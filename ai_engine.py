@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
-AI Orchestration Engine — Kimi-K2 via OpenRouter
+AI Orchestration Engine — Kimi-K2 (MoonshotAI)
 Analyzes scan results, selects tools intelligently, and generates pentest reports.
 
 Supports:
+  - MoonshotAI direct API (api.moonshot.ai) — default
   - OpenRouter (free tier: moonshotai/kimi-k2:free)
   - Any OpenAI-compatible endpoint (Together.ai, self-hosted vLLM, etc.)
 
-Set OPENROUTER_API_KEY env var to enable AI features.
+Set KIMI_API_KEY (or OPENROUTER_API_KEY) env var to enable AI features.
 Without an API key, the engine falls back to rule-based analysis.
 """
 
@@ -23,9 +24,22 @@ except ImportError:
     _req = None
 
 # ── Configuration ────────────────────────────────────────────────────────────
-OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
-AI_BASE_URL = os.environ.get("AI_BASE_URL", "https://openrouter.ai/api/v1")
-AI_MODEL = os.environ.get("AI_MODEL", "moonshotai/kimi-k2:free")
+# Supports both KIMI_API_KEY (Moonshot direct) and OPENROUTER_API_KEY (OpenRouter)
+_KIMI_KEY = os.environ.get("KIMI_API_KEY", "")
+_OPENROUTER_KEY = os.environ.get("OPENROUTER_API_KEY", "")
+
+if _KIMI_KEY:
+    OPENROUTER_API_KEY = _KIMI_KEY
+    AI_BASE_URL = os.environ.get("AI_BASE_URL", "https://api.moonshot.ai/v1")
+    AI_MODEL = os.environ.get("AI_MODEL", "kimi-k2-0711-preview")
+elif _OPENROUTER_KEY:
+    OPENROUTER_API_KEY = _OPENROUTER_KEY
+    AI_BASE_URL = os.environ.get("AI_BASE_URL", "https://openrouter.ai/api/v1")
+    AI_MODEL = os.environ.get("AI_MODEL", "moonshotai/kimi-k2:free")
+else:
+    OPENROUTER_API_KEY = ""
+    AI_BASE_URL = os.environ.get("AI_BASE_URL", "https://api.moonshot.ai/v1")
+    AI_MODEL = os.environ.get("AI_MODEL", "kimi-k2-0711-preview")
 
 
 def ai_available():
