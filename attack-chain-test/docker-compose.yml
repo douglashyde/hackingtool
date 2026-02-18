@@ -1,0 +1,45 @@
+version: "3.8"
+
+# =============================================================================
+# Attack Chain 1 Test Environment
+# Replicates www.starregistry.com vulnerabilities in a safe local environment
+# =============================================================================
+
+services:
+  db:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: wordpress
+      MYSQL_USER: wpuser
+      MYSQL_PASSWORD: wppass
+    volumes:
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  wordpress:
+    image: wordpress:php8.2-apache
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8080:80"
+    environment:
+      WORDPRESS_DB_HOST: db
+      WORDPRESS_DB_NAME: wordpress
+      WORDPRESS_DB_USER: wpuser
+      WORDPRESS_DB_PASSWORD: wppass
+      WORDPRESS_TABLE_PREFIX: wp_
+    volumes:
+      - wp_data:/var/www/html
+      - ./scripts/setup-vulnerable-wp.sh:/usr/local/bin/setup-vulnerable-wp.sh
+
+volumes:
+  db_data:
+  wp_data:
