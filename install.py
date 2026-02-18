@@ -85,7 +85,7 @@ def system_update_and_install(choice):
             console.print(f"[red][!][/red] apt update/upgrade failed (non-fatal). Continuing installation. Error: {e}")
         console.print("[yellow]* Installing required packages (apt)...[/yellow]")
         try:
-            run_cmd("apt-get install -y git python3-pip python3-venv figlet boxes php curl xdotool wget")
+            run_cmd("apt-get install -y git python3-pip python3-venv figlet boxes lolcat php curl xdotool wget")
         except subprocess.CalledProcessError as e:
             console.print(f"[red][!][/red] apt-get install failed (non-fatal). You may need to install some packages manually. Error: {e}")
     elif choice == 2:
