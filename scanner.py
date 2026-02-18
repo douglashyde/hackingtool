@@ -887,34 +887,6 @@ def mod_enum4linux(target, tt):
     return {"raw_output": out[:5000], "findings": F, "attacks": A}
 
 
-def mod_dnstwist(target, tt):
-    """Typosquatting and phishing domain detection."""
-    dt = _tpath("dnstwist")
-    if not dt and not _tool("dnstwist"):
-        return {"raw_output": "dnstwist not installed", "findings": [], "attacks": [], "skipped": True}
-    domain = _domain(target)
-    F, A = [], []
-    cmd = f"cd {dt} && python3 dnstwist.py -r {domain} 2>&1 | head -60" if dt else f"dnstwist -r {domain} 2>&1 | head -60"
-    s,e,_ = _run(cmd, 120)
-    out = s + e
-    lookalikes = []
-    for ln in out.split("\n"):
-        parts = ln.split()
-        if len(parts) >= 2 and "." in parts[1] and parts[1] != domain:
-            lookalike = parts[1].strip()
-            if lookalike.endswith(domain.split(".")[-1]) or "." in lookalike:
-                lookalikes.append(lookalike)
-                F.append(_finding("info", f"Lookalike: {lookalike}", ln.strip(), module="DNSTwist"))
-    active = [l for l in out.split("\n") if re.search(r'\d+\.\d+\.\d+\.\d+', l)]
-    if active:
-        F.append(_finding("medium", f"{len(active)} active lookalike domains", "Could be used for phishing", module="DNSTwist"))
-        A.append(_attack("Investigate lookalikes", f"{len(active)} active typosquatting domains",
-            f"dnstwist -r {domain} --whois",
-            "medium", "recon",
-            context=f"Found {len(active)} registered lookalike domains for {domain}. These could be used by attackers for phishing or brand impersonation.",
-            look_for="Look for domains with IP addresses — these are active and potentially malicious. Check WHOIS data for suspicious registrants."))
-    return {"raw_output": out[:3000], "findings": F, "attacks": A}
-
 
 def mod_theharvester(target, tt):
     """Email, host, and subdomain harvesting from OSINT sources."""
@@ -1126,7 +1098,6 @@ MODULES = [
     {"id":"wpscan",       "name":"WordPress Scanner",        "fn":mod_wpscan,       "types":["domain","url"],             "phase":"scanning"},
     {"id":"admin_enum",   "name":"Admin & User Enumeration", "fn":mod_admin_enum,   "types":["domain","url"],             "phase":"scanning"},
     {"id":"enum4linux",   "name":"SMB/Windows Enum",         "fn":mod_enum4linux,   "types":["domain","url","ip"],        "phase":"scanning"},
-    {"id":"dnstwist",     "name":"Typosquatting Detection",  "fn":mod_dnstwist,     "types":["domain","url"],             "phase":"scanning"},
     # ── Exploitation phase ──
     {"id":"sqlmap",       "name":"SQL Injection Scan",       "fn":mod_sqlmap,       "types":["domain","url"],             "phase":"exploitation"},
     {"id":"xsstrike",     "name":"XSS Scanner",              "fn":mod_xsstrike,     "types":["domain","url"],             "phase":"exploitation"},
