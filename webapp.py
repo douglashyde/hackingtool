@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-HackingTool Web Interface
-A modern web dashboard that combines all tools into one browser-based UI.
+HackingTool — Red Team Platform
+Web interface with automated scanning, reporting, and attack suggestions.
 """
 
 import json
@@ -12,7 +12,7 @@ import time
 import uuid
 from flask import Flask, render_template, jsonify, request
 
-# ── Import all tool collections (same as hackingtool.py) ────────────────────
+# ── Import all tool collections ──────────────────────────────────────────────
 from core import HackingTool, HackingToolsCollection
 from tools.anonsurf import AnonSurfTools
 from tools.ddos import DDOSTools
@@ -33,9 +33,12 @@ from tools.wireless_attack_tools import WirelessAttackTools
 from tools.wordlist_generator import WordlistGeneratorTools
 from tools.xss_attack import XSSAttackTools
 
+# ── Import scanner engine ────────────────────────────────────────────────────
+import scanner
+
 app = Flask(__name__)
 
-# ── Category metadata matching hackingtool.py ───────────────────────────────
+# ── Category metadata ────────────────────────────────────────────────────────
 CATEGORIES = [
     {"icon": "\U0001f6e1\ufe0f", "name": "Anonymously Hiding Tools",       "collection": AnonSurfTools()},
     {"icon": "\U0001f50d",       "name": "Information Gathering Tools",     "collection": InformationGatheringTools()},
@@ -56,8 +59,8 @@ CATEGORIES = [
     {"icon": "\u2728",           "name": "Other Tools",                    "collection": OtherTools()},
 ]
 
-# ── Task output storage (for async command execution) ───────────────────────
-tasks = {}  # task_id -> {"output": str, "running": bool, "returncode": int|None}
+# ── Task storage for async command execution ─────────────────────────────────
+tasks = {}
 
 
 def _get_attr(obj, *names, default=""):
@@ -69,17 +72,14 @@ def _get_attr(obj, *names, default=""):
 
 
 def extract_tools(tool_list):
-    """Recursively extract tool metadata from a list of HackingTool / HackingToolsCollection."""
     results = []
     for tool in tool_list:
         if isinstance(tool, HackingToolsCollection):
-            # Sub-collection: recurse into it
-            sub_tools = extract_tools(tool.TOOLS)
             results.append({
                 "type": "collection",
                 "title": _get_attr(tool, "TITLE", default=tool.__class__.__name__),
                 "description": _get_attr(tool, "DESCRIPTION", default=""),
-                "tools": sub_tools,
+                "tools": extract_tools(tool.TOOLS),
             })
         elif isinstance(tool, HackingTool):
             install_cmds = _get_attr(tool, "INSTALL_COMMANDS", default=[])
@@ -98,32 +98,27 @@ def extract_tools(tool_list):
 
 
 def build_api_data():
-    """Build the full JSON tree of categories → tools."""
     categories = []
     for cat in CATEGORIES:
         coll = cat["collection"]
-        tools = extract_tools(coll.TOOLS)
         categories.append({
             "icon": cat["icon"],
             "name": cat["name"],
             "description": _get_attr(coll, "DESCRIPTION", default=""),
-            "tools": tools,
+            "tools": extract_tools(coll.TOOLS),
         })
     return categories
 
 
 def run_command_async(task_id, commands):
-    """Run a list of shell commands sequentially, capturing combined output."""
     tasks[task_id] = {"output": "", "running": True, "returncode": None}
     combined_rc = 0
     for cmd in commands:
         tasks[task_id]["output"] += f"$ {cmd}\n"
         try:
-            proc = subprocess.Popen(
-                cmd, shell=True,
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, bufsize=1
-            )
+            proc = subprocess.Popen(cmd, shell=True,
+                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                    text=True, bufsize=1)
             for line in proc.stdout:
                 tasks[task_id]["output"] += line
             proc.wait()
@@ -137,12 +132,18 @@ def run_command_async(task_id, commands):
     tasks[task_id]["returncode"] = combined_rc
 
 
-# ── Routes ──────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# Routes — Pages
+# ══════════════════════════════════════════════════════════════════════════════
 
 @app.route("/")
 def index():
     return render_template("index.html")
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Routes — Arsenal API (existing tool browser)
+# ══════════════════════════════════════════════════════════════════════════════
 
 @app.route("/api/tools")
 def api_tools():
@@ -151,44 +152,84 @@ def api_tools():
 
 @app.route("/api/run", methods=["POST"])
 def api_run():
-    """Execute a tool's run commands asynchronously."""
     data = request.get_json(force=True)
     commands = data.get("commands", [])
     if not commands:
-        return jsonify({"error": "No commands provided"}), 400
+        return jsonify({"error": "No commands"}), 400
     task_id = str(uuid.uuid4())[:8]
-    t = threading.Thread(target=run_command_async, args=(task_id, commands), daemon=True)
-    t.start()
+    threading.Thread(target=run_command_async, args=(task_id, commands), daemon=True).start()
     return jsonify({"task_id": task_id})
 
 
 @app.route("/api/install", methods=["POST"])
 def api_install():
-    """Execute a tool's install commands asynchronously."""
     data = request.get_json(force=True)
     commands = data.get("commands", [])
     if not commands:
-        return jsonify({"error": "No commands provided"}), 400
+        return jsonify({"error": "No commands"}), 400
     task_id = str(uuid.uuid4())[:8]
-    t = threading.Thread(target=run_command_async, args=(task_id, commands), daemon=True)
-    t.start()
+    threading.Thread(target=run_command_async, args=(task_id, commands), daemon=True).start()
     return jsonify({"task_id": task_id})
 
 
 @app.route("/api/task/<task_id>")
 def api_task(task_id):
-    """Poll for command output."""
     task = tasks.get(task_id)
     if not task:
-        return jsonify({"error": "Task not found"}), 404
+        return jsonify({"error": "Not found"}), 404
     return jsonify(task)
 
 
-# ── Main ────────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# Routes — Scan API (new orchestrated scanning)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/scan", methods=["POST"])
+def api_scan_start():
+    """Start an orchestrated scan against a target."""
+    data = request.get_json(force=True)
+    target = data.get("target", "").strip()
+    if not target:
+        return jsonify({"error": "No target provided"}), 400
+    target_type = data.get("target_type") or None
+    scan_id = scanner.start_scan(target, target_type)
+    return jsonify({"scan_id": scan_id})
+
+
+@app.route("/api/scan/<scan_id>")
+def api_scan_get(scan_id):
+    """Get scan status, progress, findings, and attack suggestions."""
+    scan = scanner.get_scan(scan_id)
+    if not scan:
+        return jsonify({"error": "Scan not found"}), 404
+    return jsonify(scan)
+
+
+@app.route("/api/scans")
+def api_scan_list():
+    """List all scans."""
+    return jsonify(scanner.list_scans())
+
+
+@app.route("/api/scan/<scan_id>/execute", methods=["POST"])
+def api_scan_execute_attack(scan_id):
+    """Execute an attack command from scan results."""
+    data = request.get_json(force=True)
+    command = data.get("command", "").strip()
+    if not command:
+        return jsonify({"error": "No command"}), 400
+    task_id = str(uuid.uuid4())[:8]
+    threading.Thread(target=run_command_async, args=(task_id, [command]), daemon=True).start()
+    return jsonify({"task_id": task_id})
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Main
+# ══════════════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
     print("\n\033[1;35m" + "=" * 60)
-    print("  HACKINGTOOL — Web Dashboard")
-    print("  Open http://localhost:5000 in your browser")
+    print("  HACKINGTOOL — Red Team Platform")
+    print("  http://localhost:5000")
     print("=" * 60 + "\033[0m\n")
     app.run(host="0.0.0.0", port=5000, debug=True)

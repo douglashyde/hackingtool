@@ -50,6 +50,9 @@ apt-get install -y \
     tilix xdotool \
     autopsy \
     jq unzip \
+    whois dnsutils sslscan whatweb wafw00f hydra \
+    masscan gobuster wpscan john hashcat enum4linux \
+    theharvester recon-ng amass \
     2>/dev/null || warn "Some system packages failed (non-fatal)"
 
 # Ruby gems
@@ -64,6 +67,7 @@ mkdir -p "$GOPATH"
 pip3 install --break-system-packages \
     slowloris androguard stegcracker socialscan shodan \
     howmanypeoplearearound requests flask rich \
+    python-whois censys holehe phoneinfoga \
     2>/dev/null || warn "Some pip packages failed"
 
 # =============================================================================

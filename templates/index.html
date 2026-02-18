@@ -3,241 +3,268 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>HackingTool — Web Dashboard</title>
+<title>HackingTool — Red Team Platform</title>
 <style>
-/* ── Reset & Base ──────────────────────────────────────────────────────── */
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
   --bg:#0a0a0f;--bg2:#12121a;--bg3:#1a1a2e;--bg4:#222240;
   --purple:#7B61FF;--purple-dim:#5a45cc;--purple-glow:rgba(123,97,255,.25);
-  --cyan:#00e5ff;--green:#00ff88;--red:#ff4060;--yellow:#ffd740;
+  --cyan:#00e5ff;--green:#00ff88;--red:#ff4060;--yellow:#ffd740;--orange:#ff8a40;
   --text:#e0e0e0;--text-dim:#888;--text-bright:#fff;
   --radius:10px;--radius-sm:6px;
 }
 html{font-size:15px;scroll-behavior:smooth}
 body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,-apple-system,sans-serif;min-height:100vh;display:flex;flex-direction:column}
-a{color:var(--cyan);text-decoration:none}
-a:hover{text-decoration:underline}
-::-webkit-scrollbar{width:8px}
-::-webkit-scrollbar-track{background:var(--bg2)}
-::-webkit-scrollbar-thumb{background:var(--purple-dim);border-radius:4px}
+a{color:var(--cyan);text-decoration:none}a:hover{text-decoration:underline}
+::-webkit-scrollbar{width:8px}::-webkit-scrollbar-track{background:var(--bg2)}::-webkit-scrollbar-thumb{background:var(--purple-dim);border-radius:4px}
 
-/* ── Header ────────────────────────────────────────────────────────────── */
-.header{
-  background:linear-gradient(135deg,var(--bg2),var(--bg3));
-  border-bottom:2px solid var(--purple);
-  padding:1rem 2rem;display:flex;align-items:center;gap:1.5rem;
-  position:sticky;top:0;z-index:100;
-  box-shadow:0 4px 30px rgba(123,97,255,.15);
-}
-.logo{font-size:1.6rem;font-weight:800;letter-spacing:2px;color:var(--purple);text-transform:uppercase}
-.logo span{color:var(--cyan)}
-.search-box{
-  flex:1;max-width:500px;position:relative;
-}
-.search-box input{
-  width:100%;padding:.65rem 1rem .65rem 2.5rem;
-  background:var(--bg);border:1px solid var(--bg4);border-radius:var(--radius);
-  color:var(--text);font-size:.95rem;outline:none;transition:border .2s;
-}
-.search-box input:focus{border-color:var(--purple)}
-.search-box::before{
-  content:'⌕';position:absolute;left:.8rem;top:50%;transform:translateY(-50%);
-  color:var(--text-dim);font-size:1.1rem;
-}
-.stats{margin-left:auto;display:flex;gap:1.5rem}
-.stat{text-align:center}
-.stat-num{font-size:1.3rem;font-weight:700;color:var(--purple)}
-.stat-label{font-size:.7rem;text-transform:uppercase;letter-spacing:1px;color:var(--text-dim)}
+/* Header */
+.header{background:linear-gradient(135deg,var(--bg2),var(--bg3));border-bottom:2px solid var(--purple);padding:.8rem 2rem;display:flex;align-items:center;gap:1.5rem;position:sticky;top:0;z-index:100;box-shadow:0 4px 30px rgba(123,97,255,.15)}
+.logo{font-size:1.4rem;font-weight:800;letter-spacing:2px;color:var(--purple);text-transform:uppercase;white-space:nowrap}.logo span{color:var(--cyan)}
+.tab-bar{display:flex;gap:0;margin-left:2rem}
+.tab{padding:.6rem 1.5rem;cursor:pointer;font-size:.85rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-dim);border-bottom:3px solid transparent;transition:all .2s}
+.tab:hover{color:var(--text-bright)}
+.tab.active{color:var(--purple);border-bottom-color:var(--purple)}
+.header-right{margin-left:auto;display:flex;align-items:center;gap:1rem}
 
-/* ── Layout ────────────────────────────────────────────────────────────── */
-.main{display:flex;flex:1;overflow:hidden}
+/* Pages */
+.page{display:none;flex:1;overflow:hidden}.page.active{display:flex;flex-direction:column}
 
-/* Sidebar */
-.sidebar{
-  width:280px;min-width:280px;background:var(--bg2);border-right:1px solid var(--bg4);
-  overflow-y:auto;padding:.5rem 0;
-}
-.sidebar-item{
-  padding:.7rem 1.2rem;cursor:pointer;display:flex;align-items:center;gap:.7rem;
-  font-size:.88rem;transition:all .15s;border-left:3px solid transparent;
-}
+/* ═══ SCAN PAGE ═══ */
+.scan-page{padding:0;overflow-y:auto}
+
+/* Target input section */
+.target-section{padding:3rem 2rem 2rem;text-align:center;background:linear-gradient(180deg,var(--bg3) 0%,var(--bg) 100%)}
+.target-section h1{font-size:2rem;color:var(--text-bright);margin-bottom:.3rem;font-weight:800}
+.target-section p{color:var(--text-dim);margin-bottom:2rem;font-size:.95rem}
+.target-form{max-width:700px;margin:0 auto;display:flex;gap:.8rem;flex-wrap:wrap;justify-content:center}
+.target-input-wrap{flex:1;min-width:300px;position:relative}
+.target-input{width:100%;padding:1rem 1.2rem 1rem 3rem;background:var(--bg2);border:2px solid var(--bg4);border-radius:var(--radius);color:var(--text-bright);font-size:1.1rem;outline:none;transition:border .2s}
+.target-input:focus{border-color:var(--purple)}
+.target-input-wrap::before{content:'>';position:absolute;left:1.2rem;top:50%;transform:translateY(-50%);color:var(--purple);font-size:1.2rem;font-weight:800;font-family:monospace}
+.type-badge{position:absolute;right:.8rem;top:50%;transform:translateY(-50%);background:var(--bg4);color:var(--cyan);padding:3px 10px;border-radius:4px;font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:1px}
+.btn-scan{padding:1rem 2.5rem;background:var(--purple);color:#fff;border:none;border-radius:var(--radius);font-size:1rem;font-weight:700;cursor:pointer;text-transform:uppercase;letter-spacing:1px;transition:all .2s;white-space:nowrap}
+.btn-scan:hover{background:var(--purple-dim);box-shadow:0 0 20px var(--purple-glow)}
+.btn-scan:disabled{opacity:.5;cursor:not-allowed}
+
+/* Scan history */
+.scan-history{max-width:700px;margin:1.5rem auto 0;width:100%}
+.scan-history h3{font-size:.8rem;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-dim);margin-bottom:.5rem}
+.history-item{display:flex;align-items:center;gap:1rem;padding:.6rem 1rem;background:var(--bg2);border:1px solid var(--bg4);border-radius:var(--radius-sm);margin-bottom:.4rem;cursor:pointer;transition:all .15s}
+.history-item:hover{border-color:var(--purple)}
+.history-target{font-weight:600;color:var(--text-bright);flex:1}
+.history-type{font-size:.7rem;color:var(--cyan);text-transform:uppercase;background:var(--bg4);padding:2px 8px;border-radius:4px}
+.history-status{font-size:.75rem;font-weight:600}
+.history-status.running{color:var(--yellow)}
+.history-status.completed{color:var(--green)}
+
+/* Scan results area */
+.scan-results{display:none;padding:0 2rem 3rem;max-width:1200px;margin:0 auto;width:100%}
+.scan-results.active{display:block}
+
+/* Progress section */
+.progress-section{margin-bottom:2rem}
+.progress-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem}
+.progress-header h2{font-size:1.3rem;color:var(--text-bright);display:flex;align-items:center;gap:.5rem}
+.progress-target{color:var(--cyan);font-weight:400;font-size:1rem}
+.progress-bar-wrap{background:var(--bg2);border-radius:8px;height:8px;overflow:hidden;margin-bottom:1rem}
+.progress-bar{height:100%;background:linear-gradient(90deg,var(--purple),var(--cyan));border-radius:8px;transition:width .3s;width:0%}
+.modules-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:.5rem}
+.mod-item{display:flex;align-items:center;gap:.6rem;padding:.5rem .8rem;background:var(--bg2);border:1px solid var(--bg4);border-radius:var(--radius-sm);font-size:.8rem}
+.mod-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.mod-dot.pending{background:var(--bg4)}.mod-dot.running{background:var(--yellow);box-shadow:0 0 8px var(--yellow);animation:pulse 1s infinite}
+.mod-dot.completed{background:var(--green)}.mod-dot.skipped{background:var(--text-dim)}.mod-dot.error{background:var(--red)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.mod-name{color:var(--text);flex:1}.mod-count{color:var(--text-dim);font-size:.7rem}
+
+/* Summary cards */
+.summary-row{display:flex;gap:1rem;margin:1.5rem 0;flex-wrap:wrap}
+.summary-card{flex:1;min-width:100px;background:var(--bg2);border:1px solid var(--bg4);border-radius:var(--radius);padding:1rem;text-align:center}
+.summary-card .num{font-size:2rem;font-weight:800}
+.summary-card .label{font-size:.7rem;text-transform:uppercase;letter-spacing:1px;color:var(--text-dim);margin-top:.2rem}
+.sev-critical .num{color:var(--red)}.sev-high .num{color:var(--orange)}.sev-medium .num{color:var(--yellow)}.sev-low .num{color:var(--cyan)}.sev-info .num{color:var(--text-dim)}
+
+/* Findings table */
+.section-title{font-size:1.1rem;font-weight:700;color:var(--text-bright);margin:2rem 0 1rem;display:flex;align-items:center;gap:.5rem}
+.findings-table{width:100%;border-collapse:collapse}
+.findings-table th{text-align:left;font-size:.7rem;text-transform:uppercase;letter-spacing:1px;color:var(--text-dim);padding:.6rem .8rem;border-bottom:1px solid var(--bg4)}
+.findings-table td{padding:.6rem .8rem;border-bottom:1px solid var(--bg4);font-size:.85rem;vertical-align:top}
+.findings-table tr:hover{background:var(--bg3)}
+.sev-badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:.7rem;font-weight:700;text-transform:uppercase}
+.sev-badge.critical{background:rgba(255,64,96,.15);color:var(--red)}.sev-badge.high{background:rgba(255,138,64,.15);color:var(--orange)}
+.sev-badge.medium{background:rgba(255,215,64,.15);color:var(--yellow)}.sev-badge.low{background:rgba(0,229,255,.15);color:var(--cyan)}
+.sev-badge.info{background:rgba(136,136,136,.15);color:var(--text-dim)}
+
+/* Attack cards */
+.attacks-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(350px,1fr));gap:1rem}
+.attack-card{background:var(--bg2);border:1px solid var(--bg4);border-radius:var(--radius);padding:1.2rem;transition:all .2s;position:relative}
+.attack-card:hover{border-color:var(--red);box-shadow:0 0 15px rgba(255,64,96,.15)}
+.attack-card .atk-name{font-size:.95rem;font-weight:700;color:var(--text-bright);margin-bottom:.3rem;display:flex;align-items:center;gap:.5rem}
+.attack-card .atk-desc{font-size:.8rem;color:var(--text-dim);margin-bottom:.6rem}
+.attack-card .atk-cmd{font-family:'Fira Code',monospace;font-size:.75rem;background:var(--bg);padding:.5rem .8rem;border-radius:var(--radius-sm);color:var(--green);margin-bottom:.8rem;word-break:break-all;max-height:3rem;overflow:hidden}
+.attack-card .atk-footer{display:flex;align-items:center;gap:.5rem}
+.atk-risk{font-size:.65rem;padding:2px 8px;border-radius:4px;font-weight:700;text-transform:uppercase}
+.atk-risk.critical{background:rgba(255,64,96,.15);color:var(--red)}.atk-risk.high{background:rgba(255,138,64,.15);color:var(--orange)}
+.atk-risk.medium{background:rgba(255,215,64,.15);color:var(--yellow)}.atk-risk.low{background:rgba(0,229,255,.15);color:var(--cyan)}
+.atk-cat{font-size:.65rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px}
+.btn-execute{margin-left:auto;padding:.4rem 1rem;background:var(--red);color:#fff;border:none;border-radius:var(--radius-sm);font-size:.75rem;font-weight:600;cursor:pointer;transition:all .15s}
+.btn-execute:hover{background:#cc2040;box-shadow:0 0 10px rgba(255,64,96,.3)}
+
+/* Raw output toggle */
+.raw-toggle{cursor:pointer;color:var(--purple);font-size:.8rem;margin:1rem 0}.raw-toggle:hover{text-decoration:underline}
+.raw-output{display:none;background:var(--bg);padding:1rem;border-radius:var(--radius-sm);font-family:monospace;font-size:.75rem;color:var(--green);white-space:pre-wrap;max-height:300px;overflow-y:auto;margin-bottom:1rem;border:1px solid var(--bg4)}
+.raw-output.open{display:block}
+
+/* ═══ ARSENAL PAGE ═══ */
+.arsenal-page{flex-direction:row!important}
+.sidebar{width:280px;min-width:280px;background:var(--bg2);border-right:1px solid var(--bg4);overflow-y:auto;padding:.5rem 0}
+.sidebar-item{padding:.7rem 1.2rem;cursor:pointer;display:flex;align-items:center;gap:.7rem;font-size:.88rem;transition:all .15s;border-left:3px solid transparent}
 .sidebar-item:hover{background:var(--bg3);color:var(--text-bright)}
 .sidebar-item.active{background:var(--bg3);border-left-color:var(--purple);color:var(--purple)}
 .sidebar-item .icon{font-size:1.1rem;width:1.5rem;text-align:center}
-.sidebar-item .badge{
-  margin-left:auto;background:var(--bg4);color:var(--text-dim);
-  padding:2px 8px;border-radius:10px;font-size:.72rem;font-weight:600;
-}
-.sidebar-all{
-  padding:.9rem 1.2rem;font-size:.8rem;text-transform:uppercase;letter-spacing:1.5px;
-  color:var(--purple);font-weight:700;border-bottom:1px solid var(--bg4);cursor:pointer;
-}
+.sidebar-item .badge{margin-left:auto;background:var(--bg4);color:var(--text-dim);padding:2px 8px;border-radius:10px;font-size:.72rem;font-weight:600}
+.sidebar-all{padding:.9rem 1.2rem;font-size:.8rem;text-transform:uppercase;letter-spacing:1.5px;color:var(--purple);font-weight:700;border-bottom:1px solid var(--bg4);cursor:pointer}
 .sidebar-all:hover{background:var(--bg3)}
-
-/* Content */
 .content{flex:1;overflow-y:auto;padding:1.5rem 2rem 3rem}
-
-/* ── Category Header ───────────────────────────────────────────────────── */
 .cat-header{margin-bottom:1.5rem}
 .cat-header h2{font-size:1.5rem;font-weight:700;color:var(--text-bright);display:flex;align-items:center;gap:.6rem}
-.cat-header h2 .icon{font-size:1.4rem}
-.cat-header p{color:var(--text-dim);margin-top:.3rem;font-size:.9rem}
-
-/* ── Tool Cards Grid ───────────────────────────────────────────────────── */
-.tools-grid{
-  display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:1rem;
-}
-.tool-card{
-  background:var(--bg2);border:1px solid var(--bg4);border-radius:var(--radius);
-  padding:1.2rem;transition:all .2s;position:relative;overflow:hidden;
-}
+.tools-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:1rem}
+.tool-card{background:var(--bg2);border:1px solid var(--bg4);border-radius:var(--radius);padding:1.2rem;transition:all .2s;position:relative;overflow:hidden}
 .tool-card:hover{border-color:var(--purple);box-shadow:0 0 20px var(--purple-glow);transform:translateY(-2px)}
-.tool-card .tool-title{font-size:1.05rem;font-weight:700;color:var(--text-bright);margin-bottom:.4rem;display:flex;align-items:center;gap:.5rem}
-.tool-card .tool-desc{font-size:.82rem;color:var(--text-dim);line-height:1.5;margin-bottom:.8rem;max-height:3.5rem;overflow:hidden;text-overflow:ellipsis}
+.tool-card .tool-title{font-size:1.05rem;font-weight:700;color:var(--text-bright);margin-bottom:.4rem}
+.tool-card .tool-desc{font-size:.82rem;color:var(--text-dim);line-height:1.5;margin-bottom:.8rem;max-height:3.5rem;overflow:hidden}
 .tool-card .tool-url{font-size:.75rem;color:var(--cyan);display:inline-block;margin-bottom:.8rem;word-break:break-all}
 .tool-card .tool-actions{display:flex;gap:.5rem;flex-wrap:wrap}
-.tool-card .badge-tag{
-  position:absolute;top:.8rem;right:.8rem;font-size:.65rem;padding:2px 8px;
-  border-radius:4px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;
-}
+.tool-card .badge-tag{position:absolute;top:.8rem;right:.8rem;font-size:.65rem;padding:2px 8px;border-radius:4px;font-weight:600;text-transform:uppercase}
 .badge-installable{background:rgba(0,229,255,.12);color:var(--cyan)}
 .badge-runnable{background:rgba(0,255,136,.12);color:var(--green)}
-
-/* Sub-collection inside Other Tools */
 .sub-collection{margin-bottom:1.5rem}
-.sub-collection-title{
-  font-size:1.1rem;font-weight:700;color:var(--cyan);margin-bottom:.8rem;
-  padding-bottom:.4rem;border-bottom:1px solid var(--bg4);display:flex;align-items:center;gap:.5rem;
-}
-
-/* ── Buttons ───────────────────────────────────────────────────────────── */
-.btn{
-  padding:.45rem .9rem;border:none;border-radius:var(--radius-sm);cursor:pointer;
-  font-size:.78rem;font-weight:600;transition:all .15s;display:inline-flex;align-items:center;gap:.3rem;
-}
-.btn-install{background:var(--purple);color:#fff}
-.btn-install:hover{background:var(--purple-dim);box-shadow:0 0 12px var(--purple-glow)}
-.btn-run{background:var(--green);color:#000}
-.btn-run:hover{background:#00cc6e}
-.btn-link{background:var(--bg4);color:var(--cyan)}
-.btn-link:hover{background:var(--bg3)}
-.btn:disabled{opacity:.4;cursor:not-allowed}
-
-/* ── Modal / Terminal ──────────────────────────────────────────────────── */
-.modal-overlay{
-  display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:200;
-  justify-content:center;align-items:center;backdrop-filter:blur(4px);
-}
-.modal-overlay.active{display:flex}
-.modal{
-  background:var(--bg2);border:1px solid var(--purple);border-radius:var(--radius);
-  width:90%;max-width:750px;max-height:85vh;display:flex;flex-direction:column;
-  box-shadow:0 0 60px var(--purple-glow);
-}
-.modal-header{
-  display:flex;align-items:center;justify-content:space-between;
-  padding:1rem 1.2rem;border-bottom:1px solid var(--bg4);
-}
-.modal-header h3{font-size:1.1rem;color:var(--text-bright)}
-.modal-close{
-  background:none;border:none;color:var(--text-dim);font-size:1.5rem;cursor:pointer;
-  width:2rem;height:2rem;display:flex;align-items:center;justify-content:center;
-  border-radius:50%;transition:all .15s;
-}
-.modal-close:hover{background:var(--bg4);color:var(--red)}
-.terminal{
-  flex:1;overflow-y:auto;padding:1rem;font-family:'Fira Code','Cascadia Code','SF Mono',Consolas,monospace;
-  font-size:.82rem;line-height:1.6;background:var(--bg);color:var(--green);
-  white-space:pre-wrap;word-break:break-all;min-height:200px;max-height:60vh;
-}
-.terminal .cmd{color:var(--cyan)}
-.terminal .err{color:var(--red)}
-.modal-footer{
-  padding:.8rem 1.2rem;border-top:1px solid var(--bg4);display:flex;align-items:center;gap:1rem;
-}
-.spinner{
-  width:18px;height:18px;border:2px solid var(--bg4);border-top-color:var(--purple);
-  border-radius:50%;animation:spin .6s linear infinite;
-}
-@keyframes spin{to{transform:rotate(360deg)}}
-.status-text{font-size:.8rem;color:var(--text-dim)}
-.status-done{color:var(--green)}
-.status-error{color:var(--red)}
-
-/* ── Welcome Screen ────────────────────────────────────────────────────── */
-.welcome{text-align:center;padding:4rem 2rem}
-.welcome-ascii{
-  font-family:monospace;font-size:.55rem;line-height:1.1;color:var(--purple);
-  white-space:pre;display:inline-block;text-align:left;margin-bottom:2rem;
-}
-.welcome h1{font-size:2rem;color:var(--text-bright);margin-bottom:.5rem}
-.welcome p{color:var(--text-dim);font-size:1rem;max-width:600px;margin:0 auto 1.5rem}
-.welcome-cards{display:flex;flex-wrap:wrap;justify-content:center;gap:1rem;margin-top:2rem}
-.welcome-card{
-  background:var(--bg2);border:1px solid var(--bg4);border-radius:var(--radius);
-  padding:1.2rem;width:180px;text-align:center;cursor:pointer;transition:all .2s;
-}
-.welcome-card:hover{border-color:var(--purple);transform:translateY(-3px);box-shadow:0 4px 20px var(--purple-glow)}
-.welcome-card .wc-icon{font-size:2rem;margin-bottom:.5rem}
-.welcome-card .wc-name{font-size:.85rem;color:var(--text-bright);font-weight:600}
-.welcome-card .wc-count{font-size:.72rem;color:var(--text-dim);margin-top:.2rem}
-
-/* No results */
+.sub-collection-title{font-size:1.1rem;font-weight:700;color:var(--cyan);margin-bottom:.8rem;padding-bottom:.4rem;border-bottom:1px solid var(--bg4)}
+.search-box{flex:1;max-width:400px;position:relative}
+.search-box input{width:100%;padding:.55rem 1rem .55rem 2.2rem;background:var(--bg);border:1px solid var(--bg4);border-radius:var(--radius);color:var(--text);font-size:.9rem;outline:none;transition:border .2s}
+.search-box input:focus{border-color:var(--purple)}
+.search-box::before{content:'>';position:absolute;left:.8rem;top:50%;transform:translateY(-50%);color:var(--text-dim);font-size:1rem;font-family:monospace}
 .no-results{text-align:center;padding:3rem;color:var(--text-dim)}
-.no-results .nr-icon{font-size:3rem;margin-bottom:1rem}
 
-/* ── Responsive ────────────────────────────────────────────────────────── */
+/* Buttons */
+.btn{padding:.45rem .9rem;border:none;border-radius:var(--radius-sm);cursor:pointer;font-size:.78rem;font-weight:600;transition:all .15s;display:inline-flex;align-items:center;gap:.3rem}
+.btn-install{background:var(--purple);color:#fff}.btn-install:hover{background:var(--purple-dim)}
+.btn-run{background:var(--green);color:#000}.btn-run:hover{background:#00cc6e}
+.btn-link{background:var(--bg4);color:var(--cyan)}.btn-link:hover{background:var(--bg3)}
+
+/* Modal / Terminal */
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:200;justify-content:center;align-items:center;backdrop-filter:blur(4px)}
+.modal-overlay.active{display:flex}
+.modal{background:var(--bg2);border:1px solid var(--purple);border-radius:var(--radius);width:90%;max-width:750px;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 0 60px var(--purple-glow)}
+.modal-header{display:flex;align-items:center;justify-content:space-between;padding:1rem 1.2rem;border-bottom:1px solid var(--bg4)}
+.modal-header h3{font-size:1.1rem;color:var(--text-bright)}
+.modal-close{background:none;border:none;color:var(--text-dim);font-size:1.5rem;cursor:pointer;width:2rem;height:2rem;display:flex;align-items:center;justify-content:center;border-radius:50%;transition:all .15s}
+.modal-close:hover{background:var(--bg4);color:var(--red)}
+.terminal{flex:1;overflow-y:auto;padding:1rem;font-family:'Fira Code','Cascadia Code',monospace;font-size:.82rem;line-height:1.6;background:var(--bg);color:var(--green);white-space:pre-wrap;word-break:break-all;min-height:200px;max-height:60vh}
+.terminal .cmd{color:var(--cyan)}.terminal .err{color:var(--red)}
+.modal-footer{padding:.8rem 1.2rem;border-top:1px solid var(--bg4);display:flex;align-items:center;gap:1rem}
+.spinner{width:18px;height:18px;border:2px solid var(--bg4);border-top-color:var(--purple);border-radius:50%;animation:spin .6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.status-text{font-size:.8rem;color:var(--text-dim)}.status-done{color:var(--green)}.status-error{color:var(--red)}
+
 @media(max-width:800px){
-  .sidebar{display:none}
-  .tools-grid{grid-template-columns:1fr}
-  .header{flex-wrap:wrap}
-  .stats{margin-left:0;width:100%;justify-content:center}
+  .sidebar{display:none}.tools-grid{grid-template-columns:1fr}.header{flex-wrap:wrap}.attacks-grid{grid-template-columns:1fr}
+  .target-form{flex-direction:column}.target-input-wrap{min-width:auto}
 }
 </style>
 </head>
 <body>
 
-<!-- ═══ HEADER ═══════════════════════════════════════════════════════════ -->
+<!-- HEADER -->
 <div class="header">
   <div class="logo">Hacking<span>Tool</span></div>
-  <div class="search-box">
-    <input type="text" id="searchInput" placeholder="Search tools, categories..." autocomplete="off">
+  <div class="tab-bar">
+    <div class="tab active" data-tab="scan">Scan</div>
+    <div class="tab" data-tab="arsenal">Arsenal</div>
   </div>
-  <div class="stats">
-    <div class="stat"><div class="stat-num" id="statCategories">0</div><div class="stat-label">Categories</div></div>
-    <div class="stat"><div class="stat-num" id="statTools">0</div><div class="stat-label">Tools</div></div>
-  </div>
-</div>
-
-<!-- ═══ MAIN ═════════════════════════════════════════════════════════════ -->
-<div class="main">
-  <!-- Sidebar -->
-  <div class="sidebar" id="sidebar">
-    <div class="sidebar-all" id="showAll">ALL TOOLS</div>
-  </div>
-
-  <!-- Content -->
-  <div class="content" id="content">
-    <div class="welcome" id="welcome">
-      <pre class="welcome-ascii">
-   ▄█    █▄       ▄████████  ▄████████    ▄█   ▄█▄  ▄█  ███▄▄▄▄      ▄██████▄           ███      ▄██████▄   ▄██████▄   ▄█
-  ███    ███     ███    ███ ███    ███   ███ ▄███▀ ███  ███▀▀▀██▄   ███    ███      ▀█████████▄ ███    ███ ███    ███ ███
-  ███    ███     ███    ███ ███    █▀    ███▐██▀   ███▌ ███   ███   ███    █▀          ▀███▀▀██ ███    ███ ███    ███ ███
- ▄███▄▄▄▄███▄▄   ███    ███ ███         ▄█████▀    ███▌ ███   ███  ▄███                 ███   ▀ ███    ███ ███    ███ ███
-▀▀███▀▀▀▀███▀  ▀███████████ ███        ▀▀█████▄    ███▌ ███   ███ ▀▀███ ████▄           ███     ███    ███ ███    ███ ███
-  ███    ███     ███    ███ ███    █▄    ███▐██▄   ███  ███   ███   ███    ███          ███     ███    ███ ███    ███ ███
-  ███    ███     ███    ███ ███    ███   ███ ▀███▄ ███  ███   ███   ███    ███          ███     ███    ███ ███    ███ ███▌    ▄
-  ███    █▀      ███    █▀  ████████▀    ███   ▀█▀ █▀    ▀█   █▀    ████████▀          ▄████▀    ▀██████▀   ▀██████▀  █████▄▄██
-      </pre>
-      <h1>Web Dashboard</h1>
-      <p>All penetration testing tools in one interface. Select a category from the sidebar or browse below.</p>
-      <div class="welcome-cards" id="welcomeCards"></div>
+  <div class="header-right">
+    <div class="search-box" id="arsenalSearch" style="display:none">
+      <input type="text" id="searchInput" placeholder="Search tools..." autocomplete="off">
     </div>
   </div>
 </div>
 
-<!-- ═══ MODAL ════════════════════════════════════════════════════════════ -->
+<!-- ═══ SCAN PAGE ═══ -->
+<div class="page scan-page active" id="page-scan">
+  <div class="target-section">
+    <h1>Red Team Scanner</h1>
+    <p>Enter a target — the platform runs ALL available tools and produces an attack plan.</p>
+    <div class="target-form">
+      <div class="target-input-wrap">
+        <input class="target-input" type="text" id="targetInput" placeholder="example.com, 192.168.1.1, user@mail.com, @username" autocomplete="off">
+        <span class="type-badge" id="typeBadge">domain</span>
+      </div>
+      <button class="btn-scan" id="btnScan" onclick="launchScan()">Launch Scan</button>
+    </div>
+    <div class="scan-history" id="scanHistory" style="display:none">
+      <h3>Recent Scans</h3>
+      <div id="historyList"></div>
+    </div>
+  </div>
+
+  <div class="scan-results" id="scanResults">
+    <!-- Progress -->
+    <div class="progress-section" id="progressSection">
+      <div class="progress-header">
+        <h2>Scanning <span class="progress-target" id="scanTarget"></span></h2>
+        <span class="status-text" id="scanStatus">Initializing...</span>
+      </div>
+      <div class="progress-bar-wrap"><div class="progress-bar" id="progressBar"></div></div>
+      <div class="modules-grid" id="modulesGrid"></div>
+    </div>
+
+    <!-- Summary -->
+    <div class="summary-row" id="summaryRow" style="display:none">
+      <div class="summary-card sev-critical"><div class="num" id="sumCrit">0</div><div class="label">Critical</div></div>
+      <div class="summary-card sev-high"><div class="num" id="sumHigh">0</div><div class="label">High</div></div>
+      <div class="summary-card sev-medium"><div class="num" id="sumMed">0</div><div class="label">Medium</div></div>
+      <div class="summary-card sev-low"><div class="num" id="sumLow">0</div><div class="label">Low</div></div>
+      <div class="summary-card sev-info"><div class="num" id="sumInfo">0</div><div class="label">Info</div></div>
+    </div>
+
+    <!-- Attacks -->
+    <div id="attacksSection" style="display:none">
+      <div class="section-title">Attack Options</div>
+      <div class="attacks-grid" id="attacksGrid"></div>
+    </div>
+
+    <!-- Findings -->
+    <div id="findingsSection" style="display:none">
+      <div class="section-title">All Findings</div>
+      <table class="findings-table">
+        <thead><tr><th>Severity</th><th>Finding</th><th>Detail</th><th>Module</th></tr></thead>
+        <tbody id="findingsBody"></tbody>
+      </table>
+    </div>
+
+    <!-- Raw output -->
+    <div id="rawSection" style="display:none">
+      <div class="raw-toggle" onclick="toggleRaw()">Show/Hide Raw Tool Output</div>
+      <div class="raw-output" id="rawOutput"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ ARSENAL PAGE ═══ -->
+<div class="page arsenal-page" id="page-arsenal">
+  <div class="sidebar" id="sidebar">
+    <div class="sidebar-all" id="showAll">ALL TOOLS</div>
+  </div>
+  <div class="content" id="arsenalContent">
+    <div style="text-align:center;padding:4rem 2rem">
+      <h1 style="color:var(--text-bright);margin-bottom:.5rem">Tool Arsenal</h1>
+      <p style="color:var(--text-dim)">Browse, install, and run individual penetration testing tools.</p>
+      <div id="welcomeCards" style="display:flex;flex-wrap:wrap;justify-content:center;gap:1rem;margin-top:2rem"></div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL -->
 <div class="modal-overlay" id="modal">
   <div class="modal">
     <div class="modal-header">
@@ -254,188 +281,174 @@ a:hover{text-decoration:underline}
 
 <script>
 /* ═══════════════════════════════════════════════════════════════════════════
-   HackingTool Dashboard — Client-side JS
+   HackingTool — Red Team Platform UI
    ═══════════════════════════════════════════════════════════════════════════ */
 
-let DATA = [];           // full categories array from API
-let activeCategory = -1; // -1 = welcome/all
+let DATA = [];
+let activeCategory = -1;
+let currentScanId = null;
+let scanPollInterval = null;
 
-// ── Fetch data from API ────────────────────────────────────────────────────
-async function loadData() {
-  const res = await fetch('/api/tools');
-  DATA = await res.json();
-  renderSidebar();
-  renderWelcome();
-  updateStats();
-}
+// ── Tabs ──────────────────────────────────────────────────────────────────
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.onclick = () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('page-' + tab.dataset.tab).classList.add('active');
+    document.getElementById('arsenalSearch').style.display = tab.dataset.tab === 'arsenal' ? 'block' : 'none';
+  };
+});
 
-// ── Count all tools recursively ────────────────────────────────────────────
-function countTools(items) {
-  let n = 0;
-  for (const item of items) {
-    if (item.type === 'collection') n += countTools(item.tools);
-    else n++;
+// ── Target type detection ─────────────────────────────────────────────────
+const targetInput = document.getElementById('targetInput');
+const typeBadge = document.getElementById('typeBadge');
+targetInput.addEventListener('input', () => {
+  const v = targetInput.value.trim();
+  if (!v) { typeBadge.textContent = '...'; return; }
+  if (v.match(/^[\w.+-]+@[\w.-]+\.\w+$/)) typeBadge.textContent = 'email';
+  else if (v.match(/^\+?\d[\d\s\-()]{6,}$/)) typeBadge.textContent = 'phone';
+  else if (v.match(/^\d{1,3}(\.\d{1,3}){3}$/)) typeBadge.textContent = 'ip';
+  else if (v.includes('://') || v.includes('.')) typeBadge.textContent = 'domain';
+  else typeBadge.textContent = 'username';
+});
+targetInput.addEventListener('keydown', e => { if (e.key === 'Enter') launchScan(); });
+
+// ── Launch Scan ───────────────────────────────────────────────────────────
+async function launchScan() {
+  const target = targetInput.value.trim();
+  if (!target) return;
+  const btn = document.getElementById('btnScan');
+  btn.disabled = true; btn.textContent = 'Scanning...';
+
+  try {
+    const res = await fetch('/api/scan', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({target, target_type: typeBadge.textContent === '...' ? null : typeBadge.textContent})
+    });
+    const data = await res.json();
+    if (data.error) { alert(data.error); btn.disabled = false; btn.textContent = 'Launch Scan'; return; }
+    currentScanId = data.scan_id;
+
+    // Show results area
+    document.getElementById('scanResults').classList.add('active');
+    document.getElementById('scanTarget').textContent = target;
+    document.getElementById('scanStatus').textContent = 'Running...';
+    document.getElementById('scanStatus').className = 'status-text';
+    document.getElementById('summaryRow').style.display = 'none';
+    document.getElementById('attacksSection').style.display = 'none';
+    document.getElementById('findingsSection').style.display = 'none';
+    document.getElementById('rawSection').style.display = 'none';
+    document.getElementById('modulesGrid').innerHTML = '';
+    document.getElementById('progressBar').style.width = '0%';
+
+    // Poll
+    if (scanPollInterval) clearInterval(scanPollInterval);
+    scanPollInterval = setInterval(() => pollScan(currentScanId), 1000);
+    pollScan(currentScanId);
+  } catch(e) {
+    alert('Error: ' + e.message);
   }
-  return n;
+  btn.disabled = false; btn.textContent = 'Launch Scan';
 }
 
-function totalTools() {
-  let n = 0;
-  for (const cat of DATA) n += countTools(cat.tools);
-  return n;
+// ── Poll scan status ──────────────────────────────────────────────────────
+async function pollScan(scanId) {
+  try {
+    const res = await fetch('/api/scan/' + scanId);
+    const scan = await res.json();
+    if (scan.error) return;
+
+    // Progress
+    const pct = scan.progress.total > 0 ? Math.round((scan.progress.completed / scan.progress.total) * 100) : 0;
+    document.getElementById('progressBar').style.width = pct + '%';
+    document.getElementById('scanStatus').textContent = scan.status === 'completed' ? 'Scan Complete' : 'Running: ' + scan.progress.current;
+    if (scan.status === 'completed') {
+      document.getElementById('scanStatus').className = 'status-text status-done';
+    }
+
+    // Modules
+    let modHtml = '';
+    for (const [id, m] of Object.entries(scan.modules)) {
+      const countStr = m.findings_count > 0 ? m.findings_count + ' findings' : '';
+      modHtml += `<div class="mod-item"><div class="mod-dot ${m.status}"></div><span class="mod-name">${esc(m.name)}</span><span class="mod-count">${countStr}</span></div>`;
+    }
+    document.getElementById('modulesGrid').innerHTML = modHtml;
+
+    // Summary
+    if (scan.findings.length > 0 || scan.status === 'completed') {
+      document.getElementById('summaryRow').style.display = 'flex';
+      document.getElementById('sumCrit').textContent = scan.summary.critical;
+      document.getElementById('sumHigh').textContent = scan.summary.high;
+      document.getElementById('sumMed').textContent = scan.summary.medium;
+      document.getElementById('sumLow').textContent = scan.summary.low;
+      document.getElementById('sumInfo').textContent = scan.summary.info;
+    }
+
+    // Attacks
+    if (scan.attacks.length > 0) {
+      document.getElementById('attacksSection').style.display = 'block';
+      let atkHtml = '';
+      scan.attacks.forEach(a => {
+        atkHtml += `<div class="attack-card">
+          <div class="atk-name"><span class="atk-risk ${a.risk}">${a.risk}</span> ${esc(a.name)}</div>
+          <div class="atk-desc">${esc(a.description)}</div>
+          <div class="atk-cmd">${esc(a.command)}</div>
+          <div class="atk-footer">
+            <span class="atk-cat">${esc(a.category)}</span>
+            <button class="btn-execute" onclick="executeAttack('${scanId}','${esc(a.command.replace(/'/g,"\\'"))}','${esc(a.name)}')">Execute</button>
+          </div>
+        </div>`;
+      });
+      document.getElementById('attacksGrid').innerHTML = atkHtml;
+    }
+
+    // Findings
+    if (scan.findings.length > 0) {
+      document.getElementById('findingsSection').style.display = 'block';
+      const sevOrder = {critical:0,high:1,medium:2,low:3,info:4};
+      const sorted = [...scan.findings].sort((a,b) => (sevOrder[a.severity]||5) - (sevOrder[b.severity]||5));
+      let fHtml = '';
+      sorted.forEach(f => {
+        fHtml += `<tr>
+          <td><span class="sev-badge ${f.severity}">${f.severity}</span></td>
+          <td style="color:var(--text-bright);font-weight:600">${esc(f.title)}</td>
+          <td>${esc(f.detail)}</td>
+          <td style="color:var(--text-dim)">${esc(f.module)}</td>
+        </tr>`;
+      });
+      document.getElementById('findingsBody').innerHTML = fHtml;
+    }
+
+    // Raw output
+    if (scan.status === 'completed') {
+      document.getElementById('rawSection').style.display = 'block';
+      let raw = '';
+      for (const [id, m] of Object.entries(scan.modules)) {
+        if (m.raw_output) raw += `\n══ ${m.name} ══\n${m.raw_output}\n`;
+      }
+      document.getElementById('rawOutput').textContent = raw;
+    }
+
+    // Update history
+    loadHistory();
+
+    // Stop polling when done
+    if (scan.status === 'completed') {
+      clearInterval(scanPollInterval);
+      scanPollInterval = null;
+    }
+  } catch(e) { /* ignore poll errors */ }
 }
 
-function updateStats() {
-  document.getElementById('statCategories').textContent = DATA.length;
-  document.getElementById('statTools').textContent = totalTools();
-}
-
-// ── Sidebar ────────────────────────────────────────────────────────────────
-function renderSidebar() {
-  const sb = document.getElementById('sidebar');
-  // keep "ALL TOOLS" div
-  const allDiv = sb.querySelector('.sidebar-all');
-  sb.innerHTML = '';
-  sb.appendChild(allDiv);
-
-  DATA.forEach((cat, i) => {
-    const div = document.createElement('div');
-    div.className = 'sidebar-item' + (i === activeCategory ? ' active' : '');
-    const ct = countTools(cat.tools);
-    div.innerHTML = `<span class="icon">${cat.icon}</span><span>${cat.name}</span><span class="badge">${ct}</span>`;
-    div.onclick = () => selectCategory(i);
-    sb.appendChild(div);
-  });
-}
-
-function selectCategory(idx) {
-  activeCategory = idx;
-  renderSidebar();
-  renderCategory(idx);
-}
-
-document.getElementById('showAll').onclick = () => {
-  activeCategory = -1;
-  renderSidebar();
-  renderAllCategories();
-};
-
-// ── Welcome screen ─────────────────────────────────────────────────────────
-function renderWelcome() {
-  const container = document.getElementById('welcomeCards');
-  container.innerHTML = '';
-  DATA.forEach((cat, i) => {
-    const ct = countTools(cat.tools);
-    const div = document.createElement('div');
-    div.className = 'welcome-card';
-    div.innerHTML = `<div class="wc-icon">${cat.icon}</div><div class="wc-name">${cat.name}</div><div class="wc-count">${ct} tools</div>`;
-    div.onclick = () => selectCategory(i);
-    container.appendChild(div);
-  });
-}
-
-// ── Render a single category ───────────────────────────────────────────────
-function renderCategory(idx) {
-  const cat = DATA[idx];
-  const content = document.getElementById('content');
-  let html = `<div class="cat-header"><h2><span class="icon">${cat.icon}</span> ${cat.name}</h2>`;
-  if (cat.description) html += `<p>${esc(cat.description)}</p>`;
-  html += `</div>`;
-  html += renderToolsList(cat.tools);
-  content.innerHTML = html;
-  attachCardHandlers();
-}
-
-// ── Render ALL categories ──────────────────────────────────────────────────
-function renderAllCategories() {
-  const content = document.getElementById('content');
-  let html = '';
-  DATA.forEach((cat, i) => {
-    html += `<div class="cat-header" style="margin-top:${i?'2rem':'0'}"><h2><span class="icon">${cat.icon}</span> ${cat.name}</h2></div>`;
-    html += renderToolsList(cat.tools);
-  });
-  content.innerHTML = html;
-  attachCardHandlers();
-}
-
-// ── Render tools list (handles nested sub-collections) ─────────────────────
-function renderToolsList(tools) {
-  let html = '';
-  let directTools = tools.filter(t => t.type === 'tool');
-  let subCollections = tools.filter(t => t.type === 'collection');
-
-  if (directTools.length) {
-    html += `<div class="tools-grid">`;
-    directTools.forEach(t => { html += toolCardHTML(t); });
-    html += `</div>`;
-  }
-
-  subCollections.forEach(sc => {
-    html += `<div class="sub-collection">`;
-    html += `<div class="sub-collection-title">📁 ${esc(sc.title)}</div>`;
-    html += `<div class="tools-grid">`;
-    (sc.tools || []).forEach(t => { html += toolCardHTML(t); });
-    html += `</div></div>`;
-  });
-
-  return html;
-}
-
-function toolCardHTML(t) {
-  let badges = '';
-  if (t.runnable) badges += `<span class="badge-tag badge-runnable">Runnable</span>`;
-  else if (t.installable) badges += `<span class="badge-tag badge-installable">Installable</span>`;
-
-  let desc = esc(t.description || '').replace(/\n/g, ' ');
-  if (desc.length > 140) desc = desc.slice(0, 140) + '…';
-
-  let actions = '';
-  if (t.installable) {
-    actions += `<button class="btn btn-install" data-cmds='${esc(JSON.stringify(t.install_commands))}' data-name="${esc(t.title)}">⬇ Install</button>`;
-  }
-  if (t.runnable) {
-    actions += `<button class="btn btn-run" data-cmds='${esc(JSON.stringify(t.run_commands))}' data-name="${esc(t.title)}">▶ Run</button>`;
-  }
-  if (t.project_url) {
-    actions += `<a class="btn btn-link" href="${esc(t.project_url)}" target="_blank" rel="noopener">🔗 GitHub</a>`;
-  }
-
-  return `
-  <div class="tool-card">
-    ${badges}
-    <div class="tool-title">${esc(t.title)}</div>
-    <div class="tool-desc">${desc}</div>
-    ${t.project_url ? `<a class="tool-url" href="${esc(t.project_url)}" target="_blank">${esc(t.project_url)}</a>` : ''}
-    <div class="tool-actions">${actions}</div>
-  </div>`;
-}
-
-// ── Card click handlers ────────────────────────────────────────────────────
-function attachCardHandlers() {
-  document.querySelectorAll('.btn-install').forEach(btn => {
-    btn.onclick = () => {
-      const cmds = JSON.parse(btn.dataset.cmds);
-      const name = btn.dataset.name;
-      executeCommands(`Installing: ${name}`, cmds, '/api/install');
-    };
-  });
-  document.querySelectorAll('.btn-run').forEach(btn => {
-    btn.onclick = () => {
-      const cmds = JSON.parse(btn.dataset.cmds);
-      const name = btn.dataset.name;
-      executeCommands(`Running: ${name}`, cmds, '/api/run');
-    };
-  });
-}
-
-// ── Command execution with terminal modal ──────────────────────────────────
-async function executeCommands(title, commands, endpoint) {
+// ── Execute attack ────────────────────────────────────────────────────────
+async function executeAttack(scanId, command, name) {
   const modal = document.getElementById('modal');
   const terminal = document.getElementById('terminal');
   const spinner = document.getElementById('modalSpinner');
   const status = document.getElementById('modalStatus');
-
-  document.getElementById('modalTitle').textContent = title;
+  document.getElementById('modalTitle').textContent = 'Attack: ' + name;
   terminal.innerHTML = '';
   spinner.style.display = 'block';
   status.textContent = 'Executing...';
@@ -443,134 +456,221 @@ async function executeCommands(title, commands, endpoint) {
   modal.classList.add('active');
 
   try {
-    const res = await fetch(endpoint, {
+    const res = await fetch('/api/scan/' + scanId + '/execute', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({commands})
+      body: JSON.stringify({command})
     });
     const {task_id, error} = await res.json();
     if (error) { terminal.innerHTML = `<span class="err">${esc(error)}</span>`; return; }
-
-    // Poll for output
     let lastLen = 0;
     const poll = setInterval(async () => {
-      const r = await fetch(`/api/task/${task_id}`);
-      const data = await r.json();
-      if (data.output && data.output.length > lastLen) {
-        const newText = data.output.slice(lastLen);
-        lastLen = data.output.length;
-        appendTerminal(newText);
+      const r = await fetch('/api/task/' + task_id);
+      const d = await r.json();
+      if (d.output && d.output.length > lastLen) {
+        appendTerminal(d.output.slice(lastLen));
+        lastLen = d.output.length;
       }
-      if (!data.running) {
+      if (!d.running) {
         clearInterval(poll);
         spinner.style.display = 'none';
-        if (data.returncode === 0) {
-          status.textContent = 'Completed successfully';
-          status.className = 'status-text status-done';
-        } else {
-          status.textContent = `Finished with exit code ${data.returncode}`;
-          status.className = 'status-text status-error';
-        }
+        status.textContent = d.returncode === 0 ? 'Completed' : 'Exit code: ' + d.returncode;
+        status.className = 'status-text ' + (d.returncode === 0 ? 'status-done' : 'status-error');
       }
     }, 500);
   } catch(e) {
-    terminal.innerHTML = `<span class="err">Network error: ${esc(e.message)}</span>`;
+    terminal.innerHTML = `<span class="err">${esc(e.message)}</span>`;
     spinner.style.display = 'none';
-    status.textContent = 'Failed';
-    status.className = 'status-text status-error';
   }
+}
+
+// ── Scan history ──────────────────────────────────────────────────────────
+async function loadHistory() {
+  try {
+    const res = await fetch('/api/scans');
+    const scans = await res.json();
+    if (!scans.length) { document.getElementById('scanHistory').style.display = 'none'; return; }
+    document.getElementById('scanHistory').style.display = 'block';
+    let html = '';
+    scans.reverse().slice(0, 10).forEach(s => {
+      html += `<div class="history-item" onclick="viewScan('${s.id}')">
+        <span class="history-target">${esc(s.target)}</span>
+        <span class="history-type">${esc(s.target_type)}</span>
+        <span class="history-status ${s.status}">${s.status}</span>
+      </div>`;
+    });
+    document.getElementById('historyList').innerHTML = html;
+  } catch(e) {}
+}
+
+function viewScan(scanId) {
+  currentScanId = scanId;
+  document.getElementById('scanResults').classList.add('active');
+  if (scanPollInterval) clearInterval(scanPollInterval);
+  scanPollInterval = setInterval(() => pollScan(scanId), 1000);
+  pollScan(scanId);
+}
+
+function toggleRaw() {
+  document.getElementById('rawOutput').classList.toggle('open');
+}
+
+// ═══ ARSENAL (existing tool browser) ═════════════════════════════════════
+
+async function loadTools() {
+  const res = await fetch('/api/tools');
+  DATA = await res.json();
+  renderSidebar();
+  renderWelcome();
+}
+
+function countTools(items) {
+  let n = 0;
+  for (const i of items) { n += i.type === 'collection' ? countTools(i.tools) : 1; }
+  return n;
+}
+
+function renderSidebar() {
+  const sb = document.getElementById('sidebar');
+  const allDiv = sb.querySelector('.sidebar-all');
+  sb.innerHTML = ''; sb.appendChild(allDiv);
+  DATA.forEach((cat, i) => {
+    const div = document.createElement('div');
+    div.className = 'sidebar-item' + (i === activeCategory ? ' active' : '');
+    div.innerHTML = `<span class="icon">${cat.icon}</span><span>${cat.name}</span><span class="badge">${countTools(cat.tools)}</span>`;
+    div.onclick = () => { activeCategory = i; renderSidebar(); renderCategory(i); };
+    sb.appendChild(div);
+  });
+}
+
+document.getElementById('showAll').onclick = () => { activeCategory = -1; renderSidebar(); renderAllCategories(); };
+
+function renderWelcome() {
+  const c = document.getElementById('welcomeCards'); c.innerHTML = '';
+  DATA.forEach((cat, i) => {
+    const d = document.createElement('div');
+    d.style.cssText = 'background:var(--bg2);border:1px solid var(--bg4);border-radius:var(--radius);padding:1.2rem;width:180px;text-align:center;cursor:pointer;transition:all .2s';
+    d.innerHTML = `<div style="font-size:2rem;margin-bottom:.5rem">${cat.icon}</div><div style="font-size:.85rem;color:var(--text-bright);font-weight:600">${cat.name}</div><div style="font-size:.72rem;color:var(--text-dim);margin-top:.2rem">${countTools(cat.tools)} tools</div>`;
+    d.onmouseenter = () => { d.style.borderColor = 'var(--purple)'; d.style.transform = 'translateY(-3px)'; };
+    d.onmouseleave = () => { d.style.borderColor = 'var(--bg4)'; d.style.transform = 'none'; };
+    d.onclick = () => { activeCategory = i; renderSidebar(); renderCategory(i); };
+    c.appendChild(d);
+  });
+}
+
+function renderCategory(idx) {
+  const cat = DATA[idx];
+  const c = document.getElementById('arsenalContent');
+  c.innerHTML = `<div class="cat-header"><h2><span class="icon">${cat.icon}</span> ${cat.name}</h2></div>` + renderToolsList(cat.tools);
+  attachCardHandlers();
+}
+
+function renderAllCategories() {
+  const c = document.getElementById('arsenalContent');
+  let h = '';
+  DATA.forEach((cat, i) => {
+    h += `<div class="cat-header" style="margin-top:${i?'2rem':'0'}"><h2><span class="icon">${cat.icon}</span> ${cat.name}</h2></div>` + renderToolsList(cat.tools);
+  });
+  c.innerHTML = h;
+  attachCardHandlers();
+}
+
+function renderToolsList(tools) {
+  let h = '';
+  const direct = tools.filter(t => t.type === 'tool');
+  const subs = tools.filter(t => t.type === 'collection');
+  if (direct.length) { h += '<div class="tools-grid">'; direct.forEach(t => h += toolCardHTML(t)); h += '</div>'; }
+  subs.forEach(sc => {
+    h += `<div class="sub-collection"><div class="sub-collection-title">${esc(sc.title)}</div><div class="tools-grid">`;
+    (sc.tools||[]).forEach(t => h += toolCardHTML(t));
+    h += '</div></div>';
+  });
+  return h;
+}
+
+function toolCardHTML(t) {
+  let badges = t.runnable ? '<span class="badge-tag badge-runnable">Runnable</span>' : (t.installable ? '<span class="badge-tag badge-installable">Installable</span>' : '');
+  let desc = esc(t.description||'').replace(/\n/g,' '); if (desc.length > 140) desc = desc.slice(0,140) + '...';
+  let actions = '';
+  if (t.installable) actions += `<button class="btn btn-install" data-cmds='${esc(JSON.stringify(t.install_commands))}' data-name="${esc(t.title)}">Install</button>`;
+  if (t.runnable) actions += `<button class="btn btn-run" data-cmds='${esc(JSON.stringify(t.run_commands))}' data-name="${esc(t.title)}">Run</button>`;
+  if (t.project_url) actions += `<a class="btn btn-link" href="${esc(t.project_url)}" target="_blank">GitHub</a>`;
+  return `<div class="tool-card">${badges}<div class="tool-title">${esc(t.title)}</div><div class="tool-desc">${desc}</div>${t.project_url?`<a class="tool-url" href="${esc(t.project_url)}" target="_blank">${esc(t.project_url)}</a>`:''}<div class="tool-actions">${actions}</div></div>`;
+}
+
+function attachCardHandlers() {
+  document.querySelectorAll('.btn-install').forEach(btn => {
+    btn.onclick = () => executeCommands('Installing: ' + btn.dataset.name, JSON.parse(btn.dataset.cmds), '/api/install');
+  });
+  document.querySelectorAll('.btn-run').forEach(btn => {
+    btn.onclick = () => executeCommands('Running: ' + btn.dataset.name, JSON.parse(btn.dataset.cmds), '/api/run');
+  });
+}
+
+async function executeCommands(title, commands, endpoint) {
+  const modal = document.getElementById('modal');
+  const terminal = document.getElementById('terminal');
+  const spinner = document.getElementById('modalSpinner');
+  const status = document.getElementById('modalStatus');
+  document.getElementById('modalTitle').textContent = title;
+  terminal.innerHTML = ''; spinner.style.display = 'block';
+  status.textContent = 'Executing...'; status.className = 'status-text';
+  modal.classList.add('active');
+  try {
+    const res = await fetch(endpoint, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({commands}) });
+    const {task_id, error} = await res.json();
+    if (error) { terminal.innerHTML = `<span class="err">${esc(error)}</span>`; return; }
+    let lastLen = 0;
+    const poll = setInterval(async () => {
+      const r = await fetch('/api/task/' + task_id);
+      const d = await r.json();
+      if (d.output && d.output.length > lastLen) { appendTerminal(d.output.slice(lastLen)); lastLen = d.output.length; }
+      if (!d.running) { clearInterval(poll); spinner.style.display = 'none';
+        status.textContent = d.returncode === 0 ? 'Completed' : 'Exit code: ' + d.returncode;
+        status.className = 'status-text ' + (d.returncode === 0 ? 'status-done' : 'status-error');
+      }
+    }, 500);
+  } catch(e) { terminal.innerHTML = `<span class="err">${esc(e.message)}</span>`; spinner.style.display = 'none'; }
 }
 
 function appendTerminal(text) {
-  const term = document.getElementById('terminal');
-  // Colorize $ command lines
-  const colored = esc(text).replace(/^(\$ .+)$/gm, '<span class="cmd">$1</span>')
-                            .replace(/(\[exit code: [1-9]\d*\])/g, '<span class="err">$1</span>');
-  term.innerHTML += colored;
-  term.scrollTop = term.scrollHeight;
+  const t = document.getElementById('terminal');
+  t.innerHTML += esc(text).replace(/^(\$ .+)$/gm, '<span class="cmd">$1</span>').replace(/(\[exit code: [1-9]\d*\])/g, '<span class="err">$1</span>');
+  t.scrollTop = t.scrollHeight;
 }
 
 // Modal close
-document.getElementById('modalClose').onclick = () => {
-  document.getElementById('modal').classList.remove('active');
-};
-document.getElementById('modal').onclick = (e) => {
-  if (e.target === e.currentTarget) e.currentTarget.classList.remove('active');
-};
+document.getElementById('modalClose').onclick = () => document.getElementById('modal').classList.remove('active');
+document.getElementById('modal').onclick = e => { if (e.target === e.currentTarget) e.currentTarget.classList.remove('active'); };
 
-// ── Search ─────────────────────────────────────────────────────────────────
-document.getElementById('searchInput').addEventListener('input', (e) => {
+// Search (arsenal)
+document.getElementById('searchInput').addEventListener('input', e => {
   const q = e.target.value.toLowerCase().trim();
-  if (!q) {
-    if (activeCategory >= 0) renderCategory(activeCategory);
-    else {
-      document.getElementById('content').innerHTML = '';
-      document.getElementById('content').appendChild(createWelcomeEl());
-    }
-    return;
-  }
-  // Search across all tools
+  if (!q) { if (activeCategory >= 0) renderCategory(activeCategory); else renderAllCategories(); return; }
   const results = [];
-  DATA.forEach(cat => {
-    searchInTools(cat.tools, q, results, cat.name);
-  });
-
-  const content = document.getElementById('content');
-  if (!results.length) {
-    content.innerHTML = `<div class="no-results"><div class="nr-icon">🔍</div><p>No tools found for "<strong>${esc(q)}</strong>"</p></div>`;
-    return;
-  }
-
-  let html = `<div class="cat-header"><h2>🔍 Search results for "${esc(q)}"</h2><p>${results.length} tools found</p></div>`;
-  html += `<div class="tools-grid">`;
-  results.forEach(t => { html += toolCardHTML(t); });
-  html += `</div>`;
-  content.innerHTML = html;
+  DATA.forEach(cat => searchTools(cat.tools, q, results));
+  const c = document.getElementById('arsenalContent');
+  if (!results.length) { c.innerHTML = '<div class="no-results"><p>No tools found</p></div>'; return; }
+  c.innerHTML = `<div class="cat-header"><h2>Search: "${esc(q)}" (${results.length})</h2></div><div class="tools-grid">${results.map(toolCardHTML).join('')}</div>`;
   attachCardHandlers();
 });
 
-function searchInTools(tools, q, results, prefix) {
-  for (const tool of tools) {
-    if (tool.type === 'collection') {
-      searchInTools(tool.tools || [], q, results, prefix + ' > ' + tool.title);
-    } else {
-      const haystack = (tool.title + ' ' + tool.description + ' ' + (tool.project_url || '')).toLowerCase();
-      if (haystack.includes(q)) results.push(tool);
-    }
+function searchTools(tools, q, results) {
+  for (const t of tools) {
+    if (t.type === 'collection') searchTools(t.tools||[], q, results);
+    else if ((t.title+' '+t.description+' '+(t.project_url||'')).toLowerCase().includes(q)) results.push(t);
   }
 }
 
-function createWelcomeEl() {
-  // Re-render welcome
-  const div = document.createElement('div');
-  div.id = 'welcome';
-  div.className = 'welcome';
-  div.innerHTML = document.getElementById('welcome') ?
-    `<h1>Web Dashboard</h1><p>All penetration testing tools in one interface.</p>` : '';
-  return div;
-}
+function esc(s) { const d = document.createElement('div'); d.textContent = s||''; return d.innerHTML; }
 
-// ── Escape HTML ────────────────────────────────────────────────────────────
-function esc(s) {
-  const d = document.createElement('div');
-  d.textContent = s || '';
-  return d.innerHTML;
-}
-
-// ── Keyboard shortcuts ─────────────────────────────────────────────────────
-document.addEventListener('keydown', (e) => {
-  if (e.key === '/' && document.activeElement.tagName !== 'INPUT') {
-    e.preventDefault();
-    document.getElementById('searchInput').focus();
-  }
-  if (e.key === 'Escape') {
-    document.getElementById('modal').classList.remove('active');
-    document.getElementById('searchInput').blur();
-  }
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') document.getElementById('modal').classList.remove('active');
 });
 
-// ── Init ───────────────────────────────────────────────────────────────────
-loadData();
+// ── Init ──────────────────────────────────────────────────────────────────
+loadTools();
+loadHistory();
 </script>
 </body>
 </html>
