@@ -203,7 +203,7 @@ def interact_menu():
 
 def main():
     try:
-        if system() == "Linux":
+        if system() in ("Linux", "Darwin"):
             fpath = choose_path()
             with open(fpath) as f:
                 archive = f.readline().strip()
