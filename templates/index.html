@@ -138,6 +138,7 @@ a{color:var(--cyan);text-decoration:none}a:hover{text-decoration:underline}
 .tool-card .badge-tag{position:absolute;top:.8rem;right:.8rem;font-size:.65rem;padding:2px 8px;border-radius:4px;font-weight:600;text-transform:uppercase}
 .badge-installable{background:rgba(0,229,255,.12);color:var(--cyan)}
 .badge-runnable{background:rgba(0,255,136,.12);color:var(--green)}
+.badge-installed{background:rgba(0,255,136,.12);color:var(--green)}
 .sub-collection{margin-bottom:1.5rem}
 .sub-collection-title{font-size:1.1rem;font-weight:700;color:var(--cyan);margin-bottom:.8rem;padding-bottom:.4rem;border-bottom:1px solid var(--bg4)}
 .search-box{flex:1;max-width:400px;position:relative}
@@ -589,13 +590,13 @@ function renderToolsList(tools) {
 }
 
 function toolCardHTML(t) {
-  let badges = t.runnable ? '<span class="badge-tag badge-runnable">Runnable</span>' : (t.installable ? '<span class="badge-tag badge-installable">Installable</span>' : '');
+  let badge = t.installed ? '<span class="badge-tag badge-installed">Installed</span>' : (t.installable ? '<span class="badge-tag badge-installable">Not Installed</span>' : '');
   let desc = esc(t.description||'').replace(/\n/g,' '); if (desc.length > 140) desc = desc.slice(0,140) + '...';
   let actions = '';
   if (t.installable) actions += `<button class="btn btn-install" data-cmds='${esc(JSON.stringify(t.install_commands))}' data-name="${esc(t.title)}">Install</button>`;
   if (t.runnable) actions += `<button class="btn btn-run" data-cmds='${esc(JSON.stringify(t.run_commands))}' data-name="${esc(t.title)}">Run</button>`;
   if (t.project_url) actions += `<a class="btn btn-link" href="${esc(t.project_url)}" target="_blank">GitHub</a>`;
-  return `<div class="tool-card">${badges}<div class="tool-title">${esc(t.title)}</div><div class="tool-desc">${desc}</div>${t.project_url?`<a class="tool-url" href="${esc(t.project_url)}" target="_blank">${esc(t.project_url)}</a>`:''}<div class="tool-actions">${actions}</div></div>`;
+  return `<div class="tool-card">${badge}<div class="tool-title">${esc(t.title)}</div><div class="tool-desc">${desc}</div>${t.project_url?`<a class="tool-url" href="${esc(t.project_url)}" target="_blank">${esc(t.project_url)}</a>`:''}<div class="tool-actions">${actions}</div></div>`;
 }
 
 function attachCardHandlers() {

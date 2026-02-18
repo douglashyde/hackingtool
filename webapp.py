@@ -38,6 +38,9 @@ import scanner
 
 app = Flask(__name__)
 
+# ── Tools directory (where install_all_tools.sh clones repos) ───────────
+TOOLS_DIR = os.environ.get("TOOLS_DIR", "/opt/hackingtool-arsenal")
+
 # ── Category metadata ────────────────────────────────────────────────────────
 CATEGORIES = [
     {"icon": "\U0001f6e1\ufe0f", "name": "Anonymously Hiding Tools",       "collection": AnonSurfTools()},
@@ -71,6 +74,48 @@ def _get_attr(obj, *names, default=""):
     return default
 
 
+def _guess_tool_dir(tool):
+    """Check if a tool is installed by looking for its directory in TOOLS_DIR.
+
+    Heuristics (in order):
+    1. INSTALLATION_DIR attribute on the tool class
+    2. Directory name extracted from the first 'cd <dir>' in RUN_COMMANDS
+    3. Repo name extracted from the first 'git clone' in INSTALL_COMMANDS
+    4. Check if a system binary exists (e.g. nmap, sqlmap)
+    """
+    # 1. Explicit dir
+    inst_dir = getattr(tool, "INSTALLATION_DIR", "")
+    if inst_dir:
+        if os.path.isdir(inst_dir):
+            return True
+        if os.path.isdir(os.path.join(TOOLS_DIR, inst_dir)):
+            return True
+
+    # 2. Parse 'cd <dir>' from run commands
+    for cmd in (getattr(tool, "RUN_COMMANDS", None) or []):
+        if cmd.startswith("cd "):
+            dirname = cmd.split("&&")[0].replace("cd ", "").strip()
+            if os.path.isdir(os.path.join(TOOLS_DIR, dirname)):
+                return True
+
+    # 3. Parse repo name from git clone URL
+    for cmd in (getattr(tool, "INSTALL_COMMANDS", None) or []):
+        if "git clone" in cmd:
+            url = cmd.split()[-1]
+            repo_name = url.rstrip("/").rsplit("/", 1)[-1].replace(".git", "")
+            if os.path.isdir(os.path.join(TOOLS_DIR, repo_name)):
+                return True
+
+    # 4. Check system binary (for tools like nmap, sqlmap installed via apt)
+    title = (getattr(tool, "TITLE", "") or "").lower().split("(")[0].strip()
+    if title and not getattr(tool, "INSTALL_COMMANDS", None):
+        import shutil
+        if shutil.which(title):
+            return True
+
+    return False
+
+
 def extract_tools(tool_list):
     results = []
     for tool in tool_list:
@@ -84,12 +129,14 @@ def extract_tools(tool_list):
         elif isinstance(tool, HackingTool):
             install_cmds = _get_attr(tool, "INSTALL_COMMANDS", default=[])
             run_cmds = _get_attr(tool, "RUN_COMMANDS", default=[])
+            installed = _guess_tool_dir(tool)
             results.append({
                 "type": "tool",
                 "title": _get_attr(tool, "TITLE", default=tool.__class__.__name__),
                 "description": _get_attr(tool, "DESCRIPTION", default=""),
                 "project_url": _get_attr(tool, "PROJECT_URL", default=""),
-                "installable": bool(install_cmds),
+                "installed": installed,
+                "installable": bool(install_cmds) and not installed,
                 "runnable": bool(run_cmds),
                 "install_commands": install_cmds if isinstance(install_cmds, list) else [],
                 "run_commands": run_cmds if isinstance(run_cmds, list) else [],
@@ -113,10 +160,11 @@ def build_api_data():
 def run_command_async(task_id, commands):
     tasks[task_id] = {"output": "", "running": True, "returncode": None}
     combined_rc = 0
+    cwd = TOOLS_DIR if os.path.isdir(TOOLS_DIR) else None
     for cmd in commands:
         tasks[task_id]["output"] += f"$ {cmd}\n"
         try:
-            proc = subprocess.Popen(cmd, shell=True,
+            proc = subprocess.Popen(cmd, shell=True, cwd=cwd,
                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                     text=True, bufsize=1)
             for line in proc.stdout:
