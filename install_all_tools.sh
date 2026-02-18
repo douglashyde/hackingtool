@@ -53,6 +53,14 @@ apt-get install -y \
     whois dnsutils sslscan whatweb wafw00f hydra \
     masscan gobuster wpscan john hashcat enum4linux \
     theharvester recon-ng amass \
+    nbtscan smbclient crackmapexec \
+    dnsenum fierce dnsrecon \
+    wfuzz ffuf \
+    medusa ncrack \
+    tcpdump ettercap-text-only \
+    hping3 arping fping \
+    wordlists seclists \
+    exiftool binwalk foremost \
     2>/dev/null || warn "Some system packages failed (non-fatal)"
 
 # Ruby gems
@@ -68,6 +76,7 @@ pip3 install --break-system-packages \
     slowloris androguard stegcracker socialscan shodan \
     howmanypeoplearearound requests flask rich \
     python-whois censys holehe phoneinfoga \
+    dnstwist pyngrok pyscreenshot python-nmap termcolor \
     2>/dev/null || warn "Some pip packages failed"
 
 # =============================================================================
@@ -183,10 +192,25 @@ log "--- Category: Phishing ---"
 install_tool "autophisher" "https://github.com/CodingRanjith/autophisher.git" "autophisher"
 install_tool "PyPhisher" "https://github.com/KasRoudra/PyPhisher.git" "PyPhisher" \
     "cd files 2>/dev/null && pip3 install --break-system-packages -r requirements.txt 2>/dev/null"
+install_tool "AdvPhishing" "https://github.com/Ignitetch/AdvPhishing.git" "AdvPhishing" \
+    "chmod 777 * 2>/dev/null; bash Linux-Setup.sh 2>/dev/null"
+install_tool "Setoolkit" "https://github.com/trustedsec/social-engineer-toolkit.git" "social-engineer-toolkit" \
+    "python3 setup.py 2>/dev/null"
 install_tool "SocialFish" "https://github.com/UndeadSec/SocialFish.git" "SocialFish" \
+    "pip3 install --break-system-packages -r requirements.txt 2>/dev/null"
+install_tool "HiddenEye" "https://github.com/Morsmalleo/HiddenEye.git" "HiddenEye" \
     "pip3 install --break-system-packages -r requirements.txt 2>/dev/null"
 install_tool "dnstwist" "https://github.com/elceef/dnstwist.git" "dnstwist"
 install_tool "ShellPhish" "https://github.com/An0nUD4Y/shellphish.git" "shellphish"
+install_tool "BlackEye" "https://github.com/thelinuxchoice/blackeye.git" "blackeye"
+install_tool "Maskphish" "https://github.com/jaykali/maskphish.git" "maskphish"
+install_tool "BlackPhish" "https://github.com/iinc0gnit0/BlackPhish.git" "BlackPhish" \
+    "bash install.sh 2>/dev/null"
+install_tool "ISeeYou" "https://github.com/Viralmaniar/I-See-You.git" "I-See-You" \
+    "chmod u+x ISeeYou.sh 2>/dev/null"
+install_tool "SayCheese" "https://github.com/hangetzzu/saycheese.git" "saycheese"
+install_tool "Thanos" "https://github.com/TridevReddy/Thanos.git" "Thanos" \
+    "chmod -R 777 Thanos.sh 2>/dev/null"
 
 # --- Payload Creators ---
 log "--- Category: Payload Creators ---"
@@ -227,13 +251,20 @@ install_tool "snow10" "https://github.com/beardog108/snow10.git" "snow10" \
 
 # --- Wireless ---
 log "--- Category: Wireless ---"
+install_tool "WiFiPumpkin3" "https://github.com/P0cL4bs/wifipumpkin3.git" "wifipumpkin3" \
+    "python3 setup.py install 2>/dev/null"
+install_tool "pixiewps" "https://github.com/wiire/pixiewps.git" "pixiewps" \
+    "make 2>/dev/null && make install 2>/dev/null"
 install_tool "Fluxion" "https://github.com/FluxionNetwork/fluxion.git" "fluxion" \
     "chmod +x fluxion.sh"
+install_tool "Wifiphisher" "https://github.com/wifiphisher/wifiphisher.git" "wifiphisher" \
+    "python3 setup.py install 2>/dev/null"
 install_tool "Wifite2" "https://github.com/derv82/wifite2.git" "wifite2" \
     "python3 setup.py install 2>/dev/null"
 install_tool "EvilTwin" "https://github.com/Z4nzu/fakeap.git" "fakeap"
 install_tool "Fastssh" "https://github.com/Z4nzu/fastssh.git" "fastssh" \
     "chmod +x fastssh.sh"
+install_tool "BluePot" "https://github.com/andrewmichaelsmith/bluepot.git" "bluepot"
 
 # --- DDoS ---
 log "--- Category: DDoS ---"
@@ -244,6 +275,8 @@ install_tool "aSYNcrone" "https://github.com/fatih4842/aSYNcrone.git" "aSYNcrone
 install_tool "UFONet" "https://github.com/epsylon/ufonet.git" "ufonet"
 install_tool "GoldenEye" "https://github.com/jseidl/GoldenEye.git" "GoldenEye" \
     "chmod -R 755 ."
+install_tool "Saphyra" "https://github.com/anonymous24x7/Saphyra-DDoS.git" "Saphyra-DDoS" \
+    "chmod +x saphyra.py 2>/dev/null"
 
 # --- Others ---
 log "--- Category: Other Tools ---"
@@ -265,6 +298,18 @@ install_tool "Pixload" "https://github.com/chinarulezzz/pixload.git" "pixload"
 log "--- Category: Android ---"
 install_tool "Keydroid" "https://github.com/F4dl0/keydroid.git" "keydroid"
 install_tool "LockPhish" "https://github.com/JasonJerry/lockphish.git" "lockphish"
+install_tool "MobDroid" "https://github.com/kinghacker0/mob-droid.git" "mob-droid"
+install_tool "Spycam" "https://github.com/indexnotfound404/spycam.git" "spycam" \
+    "bash install.sh 2>/dev/null && chmod +x spycam 2>/dev/null"
+
+# --- WebSploit ---
+log "--- Category: WebSploit ---"
+install_tool "WebSploit" "https://github.com/The404Hacking/websploit.git" "websploit" \
+    "cd Setup 2>/dev/null && chmod +x install.sh && bash install.sh 2>/dev/null"
+
+# --- SQL tools (additional) ---
+log "--- Category: SQL (additional) ---"
+install_tool "SQLScan" "https://github.com/nickstenning/sqlscan.git" "sqlscan" 2>/dev/null || true
 
 # =============================================================================
 # PHASE 3: Install hackingtool itself

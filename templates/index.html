@@ -100,7 +100,8 @@ a{color:var(--cyan);text-decoration:none}a:hover{text-decoration:underline}
 .attack-card{background:var(--bg2);border:1px solid var(--bg4);border-radius:var(--radius);padding:1.2rem;transition:all .2s;position:relative}
 .attack-card:hover{border-color:var(--red);box-shadow:0 0 15px rgba(255,64,96,.15)}
 .attack-card .atk-name{font-size:.95rem;font-weight:700;color:var(--text-bright);margin-bottom:.3rem;display:flex;align-items:center;gap:.5rem}
-.attack-card .atk-desc{font-size:.8rem;color:var(--text-dim);margin-bottom:.6rem}
+.attack-card .atk-desc{font-size:.8rem;color:var(--text-dim);margin-bottom:.4rem}
+.attack-card .atk-context{font-size:.78rem;color:var(--text);line-height:1.5;margin-bottom:.6rem;padding:.5rem .7rem;background:rgba(123,97,255,.06);border-left:2px solid var(--purple);border-radius:0 var(--radius-sm) var(--radius-sm) 0}
 .attack-card .atk-cmd{font-family:'Fira Code',monospace;font-size:.75rem;background:var(--bg);padding:.5rem .8rem;border-radius:var(--radius-sm);color:var(--green);margin-bottom:.8rem;word-break:break-all;max-height:3rem;overflow:hidden}
 .attack-card .atk-footer{display:flex;align-items:center;gap:.5rem}
 .atk-risk{font-size:.65rem;padding:2px 8px;border-radius:4px;font-weight:700;text-transform:uppercase}
@@ -109,6 +110,18 @@ a{color:var(--cyan);text-decoration:none}a:hover{text-decoration:underline}
 .atk-cat{font-size:.65rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px}
 .btn-execute{margin-left:auto;padding:.4rem 1rem;background:var(--red);color:#fff;border:none;border-radius:var(--radius-sm);font-size:.75rem;font-weight:600;cursor:pointer;transition:all .15s}
 .btn-execute:hover{background:#cc2040;box-shadow:0 0 10px rgba(255,64,96,.3)}
+
+/* Terminal context header */
+.term-context{padding:.8rem 1rem;margin-bottom:.5rem;border-radius:var(--radius-sm);font-size:.82rem;line-height:1.6}
+.term-context .ctx-title{color:var(--purple);font-weight:700;font-size:.9rem;margin-bottom:.4rem;display:flex;align-items:center;gap:.4rem}
+.term-context .ctx-risk{display:inline-block;padding:2px 8px;border-radius:4px;font-size:.7rem;font-weight:700;text-transform:uppercase;margin-left:.5rem}
+.term-context .ctx-risk.critical{background:rgba(255,64,96,.2);color:var(--red)}.term-context .ctx-risk.high{background:rgba(255,138,64,.2);color:var(--orange)}
+.term-context .ctx-risk.medium{background:rgba(255,215,64,.2);color:var(--yellow)}.term-context .ctx-risk.low{background:rgba(0,229,255,.2);color:var(--cyan)}
+.term-context .ctx-what{color:var(--text);margin-bottom:.5rem}
+.term-context .ctx-look{color:var(--cyan);padding:.4rem .6rem;background:rgba(0,229,255,.06);border-left:2px solid var(--cyan);border-radius:0 4px 4px 0;margin-top:.4rem}
+.term-context .ctx-look strong{color:var(--text-bright)}
+.term-context .ctx-cmd{color:var(--green);font-family:'Fira Code',monospace;font-size:.78rem;padding:.4rem .6rem;background:var(--bg);border-radius:4px;margin-top:.5rem;word-break:break-all}
+.term-sep{border:none;border-top:1px solid var(--bg4);margin:.5rem 0}
 
 /* Raw output toggle */
 .raw-toggle{cursor:pointer;color:var(--purple);font-size:.8rem;margin:1rem 0}.raw-toggle:hover{text-decoration:underline}
@@ -289,6 +302,7 @@ let DATA = [];
 let activeCategory = -1;
 let currentScanId = null;
 let scanPollInterval = null;
+let currentAttacks = [];
 
 // ── Tabs ──────────────────────────────────────────────────────────────────
 document.querySelectorAll('.tab').forEach(tab => {
@@ -389,16 +403,19 @@ async function pollScan(scanId) {
 
     // Attacks
     if (scan.attacks.length > 0) {
+      currentAttacks = scan.attacks;
       document.getElementById('attacksSection').style.display = 'block';
       let atkHtml = '';
-      scan.attacks.forEach(a => {
+      scan.attacks.forEach((a, idx) => {
+        const ctxHtml = a.context ? `<div class="atk-context">${esc(a.context)}</div>` : '';
         atkHtml += `<div class="attack-card">
           <div class="atk-name"><span class="atk-risk ${a.risk}">${a.risk}</span> ${esc(a.name)}</div>
           <div class="atk-desc">${esc(a.description)}</div>
+          ${ctxHtml}
           <div class="atk-cmd">${esc(a.command)}</div>
           <div class="atk-footer">
             <span class="atk-cat">${esc(a.category)}</span>
-            <button class="btn-execute" onclick="executeAttack('${scanId}','${esc(a.command.replace(/'/g,"\\'"))}','${esc(a.name)}')">Execute</button>
+            <button class="btn-execute" onclick="executeAttack('${scanId}',${idx})">Execute</button>
           </div>
         </div>`;
       });
@@ -444,7 +461,11 @@ async function pollScan(scanId) {
 }
 
 // ── Execute attack ────────────────────────────────────────────────────────
-async function executeAttack(scanId, command, name) {
+async function executeAttack(scanId, attackIdx) {
+  const attack = currentAttacks[attackIdx];
+  if (!attack) return;
+  const {command, name, description, risk, category, context, look_for} = attack;
+
   const modal = document.getElementById('modal');
   const terminal = document.getElementById('terminal');
   const spinner = document.getElementById('modalSpinner');
@@ -456,6 +477,15 @@ async function executeAttack(scanId, command, name) {
   status.className = 'status-text';
   modal.classList.add('active');
 
+  // Build context header
+  let ctxHtml = '<div class="term-context">';
+  ctxHtml += `<div class="ctx-title">${esc(name)} <span class="ctx-risk ${risk}">${risk}</span></div>`;
+  if (context) ctxHtml += `<div class="ctx-what">${esc(context)}</div>`;
+  if (look_for) ctxHtml += `<div class="ctx-look"><strong>What to look for:</strong> ${esc(look_for)}</div>`;
+  ctxHtml += `<div class="ctx-cmd">$ ${esc(command)}</div>`;
+  ctxHtml += '</div><hr class="term-sep">';
+  terminal.innerHTML = ctxHtml;
+
   try {
     const res = await fetch('/api/scan/' + scanId + '/execute', {
       method: 'POST',
@@ -463,7 +493,7 @@ async function executeAttack(scanId, command, name) {
       body: JSON.stringify({command})
     });
     const {task_id, error} = await res.json();
-    if (error) { terminal.innerHTML = `<span class="err">${esc(error)}</span>`; return; }
+    if (error) { terminal.innerHTML += `<span class="err">${esc(error)}</span>`; return; }
     let lastLen = 0;
     const poll = setInterval(async () => {
       const r = await fetch('/api/task/' + task_id);
@@ -475,12 +505,17 @@ async function executeAttack(scanId, command, name) {
       if (!d.running) {
         clearInterval(poll);
         spinner.style.display = 'none';
-        status.textContent = d.returncode === 0 ? 'Completed' : 'Exit code: ' + d.returncode;
-        status.className = 'status-text ' + (d.returncode === 0 ? 'status-done' : 'status-error');
+        if (d.returncode === 0) {
+          status.textContent = 'Completed successfully';
+          status.className = 'status-text status-done';
+        } else {
+          status.textContent = 'Exit code: ' + d.returncode;
+          status.className = 'status-text status-error';
+        }
       }
     }, 500);
   } catch(e) {
-    terminal.innerHTML = `<span class="err">${esc(e.message)}</span>`;
+    terminal.innerHTML += `<span class="err">${esc(e.message)}</span>`;
     spinner.style.display = 'none';
   }
 }
