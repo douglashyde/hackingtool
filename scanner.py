@@ -1137,8 +1137,20 @@ MODULES = [
 ]
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Orchestrator
+# Orchestrator — Full Pipeline:
+#   1. Recon → 2. Scanning → 3. Exploitation checks
+#   4. Metasploit scans → 5. Auto-Attack execution → 6. AI Analysis → 7. Report
 # ══════════════════════════════════════════════════════════════════════════════
+
+try:
+    import ai_engine
+except ImportError:
+    ai_engine = None
+
+try:
+    import msf_engine
+except ImportError:
+    msf_engine = None
 
 _scans = {}
 
@@ -1149,18 +1161,34 @@ def start_scan(target, target_type=None):
     scan_id = uuid.uuid4().hex[:8]
     applicable = [m for m in MODULES if target_type in m["types"]]
 
+    # Estimate total phases for progress tracking
+    # Base modules + metasploit phase + auto-attack phase + AI analysis phase
+    extra_phases = 3  # metasploit, auto-attack, report
+
     scan = {
         "id": scan_id,
         "target": target,
         "target_type": target_type,
         "status": "running",
+        "phase": "recon",
         "started_at": datetime.now(timezone.utc).isoformat(),
         "completed_at": None,
         "modules": {},
         "findings": [],
         "attacks": [],
+        "attack_results": [],
+        "msf_results": [],
+        "ai_assessment": None,
+        "report_html": None,
         "summary": {"critical":0,"high":0,"medium":0,"low":0,"info":0},
-        "progress": {"total": len(applicable), "completed": 0, "current": "Starting..."},
+        "progress": {
+            "total": len(applicable) + extra_phases,
+            "completed": 0,
+            "current": "Starting...",
+            "phase": "recon",
+            "auto_attacks_total": 0,
+            "auto_attacks_done": 0,
+        },
     }
     for m in applicable:
         scan["modules"][m["id"]] = {
@@ -1174,7 +1202,12 @@ def start_scan(target, target_type=None):
 
 def _execute(scan_id, target, target_type, modules):
     scan = _scans[scan_id]
+    host = _domain(target) if target_type in ("domain", "url") else target
+
+    # ── Phase 1-3: Recon → Scanning → Exploitation (existing) ────────────
     for phase in ("recon", "scanning", "exploitation"):
+        scan["phase"] = phase
+        scan["progress"]["phase"] = phase
         phase_mods = [m for m in modules if m["phase"] == phase]
         if not phase_mods:
             continue
@@ -1203,13 +1236,215 @@ def _execute(scan_id, target, target_type, modules):
                     scan["modules"][m["id"]]["raw_output"] = str(e)
                 scan["progress"]["completed"] += 1
 
-    # Summarize
+    # Dedupe and enrich attacks after initial phases
+    _dedupe_and_enrich_attacks(scan)
+
+    # ── Phase 4: Metasploit Scans ────────────────────────────────────────
+    scan["phase"] = "metasploit"
+    scan["progress"]["phase"] = "metasploit"
+    scan["progress"]["current"] = "Metasploit Framework Scans"
+
+    if msf_engine and msf_engine.msf_available() and target_type in ("domain", "url", "ip"):
+        scan["modules"]["metasploit"] = {
+            "name": "Metasploit Framework", "phase": "metasploit",
+            "status": "running", "raw_output": "", "findings_count": 0,
+        }
+        try:
+            # Generate MSF attack commands and add to attacks list
+            msf_attacks = msf_engine.generate_attack_commands(host, scan["findings"])
+            scan["attacks"].extend(msf_attacks)
+
+            # Run MSF auxiliary modules
+            def msf_callback(name, status, result):
+                scan["progress"]["current"] = f"MSF: {name}"
+                if result:
+                    scan["msf_results"].append(result)
+                    scan["findings"].extend(result.get("findings", []))
+
+            msf_results = msf_engine.run_scan(host, scan["findings"], max_modules=8, callback=msf_callback)
+            scan["msf_results"] = msf_results
+
+            raw_msf = "\n".join(
+                f"=== {r['name']} ===\n{r['output'][:2000]}" for r in msf_results
+            )
+            msf_findings = []
+            for r in msf_results:
+                msf_findings.extend(r.get("findings", []))
+            scan["modules"]["metasploit"]["status"] = "completed"
+            scan["modules"]["metasploit"]["raw_output"] = raw_msf[:5000]
+            scan["modules"]["metasploit"]["findings_count"] = len(msf_findings)
+        except Exception as e:
+            scan["modules"]["metasploit"]["status"] = "error"
+            scan["modules"]["metasploit"]["raw_output"] = str(e)
+    else:
+        scan["modules"]["metasploit"] = {
+            "name": "Metasploit Framework", "phase": "metasploit",
+            "status": "skipped",
+            "raw_output": "msfconsole not available" if not (msf_engine and msf_engine.msf_available()) else "Not applicable for this target type",
+            "findings_count": 0,
+        }
+    scan["progress"]["completed"] += 1
+
+    # Re-dedupe attacks after adding MSF attacks
+    _dedupe_and_enrich_attacks(scan)
+
+    # ── Phase 5: Auto-Attack Execution ───────────────────────────────────
+    scan["phase"] = "auto_attack"
+    scan["progress"]["phase"] = "auto_attack"
+    scan["progress"]["current"] = "Selecting attacks to auto-execute..."
+
+    # Use AI (or rules) to pick which attacks to run
+    if ai_engine:
+        selected_indices = ai_engine.select_attacks(
+            target, target_type, scan["findings"], scan["attacks"]
+        )
+    else:
+        # Fallback: select critical/high risk attacks
+        selected_indices = [
+            i for i, a in enumerate(scan["attacks"])
+            if a["risk"] in ("critical", "high")
+        ][:15]
+
+    attacks_to_run = [
+        (i, scan["attacks"][i]) for i in selected_indices
+        if i < len(scan["attacks"])
+    ]
+    scan["progress"]["auto_attacks_total"] = len(attacks_to_run)
+    scan["progress"]["auto_attacks_done"] = 0
+
+    scan["modules"]["auto_attack"] = {
+        "name": f"Auto-Attack ({len(attacks_to_run)} selected)",
+        "phase": "auto_attack",
+        "status": "running",
+        "raw_output": "",
+        "findings_count": 0,
+    }
+
+    attack_results = []
+    for idx, (orig_idx, attack) in enumerate(attacks_to_run):
+        scan["progress"]["current"] = f"Attacking: {attack['name']} ({idx+1}/{len(attacks_to_run)})"
+
+        # Execute the attack command
+        cmd = attack["command"]
+        stdout, stderr, exit_code = _run(cmd, timeout=120)
+        output = stdout + stderr
+
+        # Analyze result
+        if ai_engine:
+            analysis = ai_engine.analyze_attack_result(
+                attack["name"], cmd, output, exit_code
+            )
+        else:
+            analysis = _basic_analyze_result(attack["name"], cmd, output, exit_code)
+
+        result = {
+            "attack_name": attack["name"],
+            "attack_index": orig_idx,
+            "command": cmd,
+            "output": output[:5000],
+            "exit_code": exit_code,
+            "risk": attack["risk"],
+            "category": attack.get("category", ""),
+            "analysis": analysis,
+        }
+        attack_results.append(result)
+
+        # If we found new credentials or confirmed vulns, add to findings
+        if analysis.get("credentials"):
+            for cred in analysis["credentials"]:
+                scan["findings"].append(_finding(
+                    "critical",
+                    f"Credential found: {cred}",
+                    f"Discovered via {attack['name']}",
+                    evidence=cred,
+                    module="Auto-Attack",
+                ))
+        if analysis.get("vulns_confirmed"):
+            for vuln in analysis["vulns_confirmed"]:
+                scan["findings"].append(_finding(
+                    "critical",
+                    f"Confirmed: {vuln}",
+                    f"Exploited via {attack['name']}",
+                    module="Auto-Attack",
+                ))
+        if analysis.get("access_gained"):
+            scan["findings"].append(_finding(
+                "critical",
+                f"Access gained: {analysis['access_gained'][:100]}",
+                f"Via {attack['name']}",
+                module="Auto-Attack",
+            ))
+
+        scan["progress"]["auto_attacks_done"] = idx + 1
+
+    scan["attack_results"] = attack_results
+    scan["modules"]["auto_attack"]["status"] = "completed"
+    scan["modules"]["auto_attack"]["raw_output"] = "\n".join(
+        f"=== {r['attack_name']} (exit:{r['exit_code']}) ===\n"
+        f"$ {r['command']}\n{r['output'][:1000]}\n"
+        f"Analysis: {r['analysis'].get('summary','')}\n"
+        for r in attack_results
+    )[:10000]
+    scan["modules"]["auto_attack"]["findings_count"] = sum(
+        1 for r in attack_results if r["analysis"].get("success")
+    )
+    scan["progress"]["completed"] += 1
+
+    # ── Phase 6: AI Analysis & Report Generation ─────────────────────────
+    scan["phase"] = "reporting"
+    scan["progress"]["phase"] = "reporting"
+    scan["progress"]["current"] = "Generating security assessment..."
+
+    scan["modules"]["report"] = {
+        "name": "AI Assessment & Report", "phase": "reporting",
+        "status": "running", "raw_output": "", "findings_count": 0,
+    }
+
+    # Recount findings after all phases
+    scan["summary"] = {"critical":0,"high":0,"medium":0,"low":0,"info":0}
     for f in scan["findings"]:
-        sev = f.get("severity","info")
+        sev = f.get("severity", "info")
         if sev in scan["summary"]:
             scan["summary"][sev] += 1
 
-    # Dedupe attacks
+    try:
+        # Generate assessment
+        if ai_engine:
+            assessment = ai_engine.generate_assessment(
+                target, target_type, scan["findings"],
+                scan["attacks"], attack_results,
+            )
+        else:
+            assessment = _fallback_assessment(scan)
+        scan["ai_assessment"] = assessment
+
+        # Generate downloadable HTML report
+        if ai_engine:
+            report_html = ai_engine.generate_report_html(
+                target, target_type, scan, assessment
+            )
+        else:
+            report_html = _fallback_report_html(target, target_type, scan, assessment)
+        scan["report_html"] = report_html
+
+        scan["modules"]["report"]["status"] = "completed"
+        scan["modules"]["report"]["raw_output"] = (assessment or "")[:5000]
+    except Exception as e:
+        scan["modules"]["report"]["status"] = "error"
+        scan["modules"]["report"]["raw_output"] = str(e)
+
+    scan["progress"]["completed"] += 1
+
+    # ── Done ─────────────────────────────────────────────────────────────
+    scan["status"] = "completed"
+    scan["phase"] = "done"
+    scan["completed_at"] = datetime.now(timezone.utc).isoformat()
+    scan["progress"]["current"] = "Done"
+    scan["progress"]["phase"] = "done"
+
+
+def _dedupe_and_enrich_attacks(scan):
+    """Deduplicate attacks and enrich with context."""
     seen = set()
     uniq = []
     for a in scan["attacks"]:
@@ -1218,13 +1453,113 @@ def _execute(scan_id, target, target_type, modules):
             uniq.append(a)
     risk_ord = {"critical":0,"high":1,"medium":2,"low":3}
     uniq.sort(key=lambda a: risk_ord.get(a.get("risk","low"),4))
-    # Enrich attacks with context explanations
     _enrich_attacks(uniq)
     scan["attacks"] = uniq
 
-    scan["status"] = "completed"
-    scan["completed_at"] = datetime.now(timezone.utc).isoformat()
-    scan["progress"]["current"] = "Done"
+
+def _basic_analyze_result(attack_name, command, output, exit_code):
+    """Basic rule-based analysis when AI engine is not available."""
+    out_lower = output.lower()
+    result = {
+        "success": False,
+        "summary": "",
+        "credentials": [],
+        "vulns_confirmed": [],
+        "access_gained": None,
+        "severity": "info",
+    }
+    success_words = [
+        "vulnerable", "injectable", "valid combination", "login:",
+        "password:", "session opened", "meterpreter", "uid=",
+    ]
+    fail_words = ["not vulnerable", "no injection", "0 valid", "connection refused"]
+
+    has_success = any(w in out_lower for w in success_words)
+    has_fail = any(w in out_lower for w in fail_words)
+
+    if has_success and not has_fail:
+        result["success"] = True
+        result["severity"] = "critical" if any(
+            w in out_lower for w in ["shell", "meterpreter", "root", "uid=0"]
+        ) else "high"
+        result["summary"] = "Target appears vulnerable"
+
+    # Extract credentials
+    for pattern in [
+        r"login:\s*(\S+)\s+password:\s*(\S+)",
+        r"Username:\s*(\S+),?\s*Password:\s*(\S+)",
+        r"\[\d+\]\[\S+\]\s+host:\s*\S+\s+login:\s*(\S+)\s+password:\s*(\S+)",
+    ]:
+        for m in re.finditer(pattern, output, re.I):
+            cred = f"{m.group(1)}:{m.group(2)}"
+            if cred not in result["credentials"]:
+                result["credentials"].append(cred)
+
+    if result["credentials"]:
+        result["success"] = True
+        result["severity"] = "critical"
+        result["summary"] = f"Found {len(result['credentials'])} credential(s)"
+        result["access_gained"] = f"Credentials: {', '.join(result['credentials'][:5])}"
+    elif not result["success"]:
+        result["summary"] = f"Completed (exit code {exit_code})" if exit_code == 0 else f"Failed (exit code {exit_code})"
+
+    return result
+
+
+def _fallback_assessment(scan):
+    """Generate assessment without AI engine."""
+    target = scan["target"]
+    findings = scan["findings"]
+    attack_results = scan["attack_results"]
+    s = scan["summary"]
+
+    successful = [r for r in attack_results if r.get("analysis", {}).get("success")]
+    creds = []
+    for r in attack_results:
+        creds.extend(r.get("analysis", {}).get("credentials", []))
+
+    risk = "CRITICAL" if s["critical"] > 0 else "HIGH" if s["high"] > 3 else "MEDIUM" if s["medium"] > 0 else "LOW"
+
+    lines = [
+        f"## Executive Summary\n",
+        f"Assessment of **{target}** found {len(findings)} issues: "
+        f"{s['critical']} critical, {s['high']} high, {s['medium']} medium. "
+        f"{len(successful)} of {len(attack_results)} auto-attacks succeeded.\n",
+        f"\n## Risk Rating: {risk}\n",
+        "\n## Critical Findings\n",
+    ]
+    for f in [f for f in findings if f["severity"] in ("critical", "high")][:15]:
+        lines.append(f"- **[{f['severity'].upper()}]** {f['title']}: {f['detail']}")
+    lines.append("\n\n## Successful Attacks\n")
+    if successful:
+        for r in successful:
+            a = r.get("analysis", {})
+            lines.append(f"- **{r['attack_name']}**: {a.get('summary','Succeeded')}")
+            if a.get("access_gained"):
+                lines.append(f"  - Access: {a['access_gained']}")
+    else:
+        lines.append("No attacks confirmed exploitation.")
+    if creds:
+        lines.append("\n\n## Credentials Found\n")
+        for c in set(creds):
+            lines.append(f"- `{c}`")
+    lines.append("\n\n## Remediation\n")
+    lines.append("1. Patch all critical vulnerabilities immediately")
+    lines.append("2. Reset compromised credentials")
+    lines.append("3. Restrict exposed services with firewall rules")
+    lines.append("4. Implement missing security headers")
+    lines.append("5. Update all outdated software")
+    return "\n".join(lines)
+
+
+def _fallback_report_html(target, target_type, scan, assessment):
+    """Generate basic HTML report without AI engine."""
+    # Import and use ai_engine's HTML generator if possible, else minimal
+    try:
+        from ai_engine import generate_report_html
+        return generate_report_html(target, target_type, scan, assessment)
+    except Exception:
+        return f"<html><body><h1>Report for {target}</h1><pre>{assessment}</pre></body></html>"
 
 
 def get_scan(scan_id):
@@ -1233,4 +1568,7 @@ def get_scan(scan_id):
 def list_scans():
     return [{"id":s["id"],"target":s["target"],"target_type":s["target_type"],
              "status":s["status"],"started_at":s["started_at"],
-             "summary":s["summary"]} for s in _scans.values()]
+             "summary":s["summary"],
+             "phase":s.get("phase",""),
+             "has_report":s.get("report_html") is not None}
+            for s in _scans.values()]

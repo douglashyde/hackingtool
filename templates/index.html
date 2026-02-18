@@ -26,11 +26,14 @@ a{color:var(--cyan);text-decoration:none}a:hover{text-decoration:underline}
 .tab:hover{color:var(--text-bright)}
 .tab.active{color:var(--purple);border-bottom-color:var(--purple)}
 .header-right{margin-left:auto;display:flex;align-items:center;gap:1rem}
+.config-badge{font-size:.7rem;padding:3px 8px;border-radius:4px;font-weight:600}
+.config-badge.on{background:rgba(0,255,136,.12);color:var(--green)}
+.config-badge.off{background:rgba(136,136,136,.12);color:var(--text-dim)}
 
 /* Pages */
 .page{display:none;flex:1;overflow:hidden}.page.active{display:flex;flex-direction:column}
 
-/* ═══ SCAN PAGE ═══ */
+/* === SCAN PAGE === */
 .scan-page{padding:0;overflow-y:auto}
 
 /* Target input section */
@@ -62,6 +65,16 @@ a{color:var(--cyan);text-decoration:none}a:hover{text-decoration:underline}
 .scan-results{display:none;padding:0 2rem 3rem;max-width:1200px;margin:0 auto;width:100%}
 .scan-results.active{display:block}
 
+/* Phase pipeline */
+.phase-pipeline{display:flex;gap:0;margin:1.5rem 0;overflow-x:auto}
+.phase-step{flex:1;min-width:100px;padding:.8rem .5rem;text-align:center;background:var(--bg2);border:1px solid var(--bg4);position:relative;font-size:.75rem;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text-dim)}
+.phase-step:first-child{border-radius:var(--radius) 0 0 var(--radius)}
+.phase-step:last-child{border-radius:0 var(--radius) var(--radius) 0}
+.phase-step.active{background:var(--bg3);border-color:var(--yellow);color:var(--yellow);box-shadow:0 0 10px rgba(255,215,64,.15)}
+.phase-step.done{background:rgba(0,255,136,.05);border-color:rgba(0,255,136,.3);color:var(--green)}
+.phase-step.pending{color:var(--text-dim)}
+.phase-step .phase-icon{font-size:1.2rem;display:block;margin-bottom:.3rem}
+
 /* Progress section */
 .progress-section{margin-bottom:2rem}
 .progress-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem}
@@ -74,6 +87,7 @@ a{color:var(--cyan);text-decoration:none}a:hover{text-decoration:underline}
 .mod-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
 .mod-dot.pending{background:var(--bg4)}.mod-dot.running{background:var(--yellow);box-shadow:0 0 8px var(--yellow);animation:pulse 1s infinite}
 .mod-dot.completed{background:var(--green)}.mod-dot.skipped{background:var(--text-dim)}.mod-dot.error{background:var(--red)}
+.mod-dot.vulnerable{background:var(--red);box-shadow:0 0 8px var(--red)}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 .mod-name{color:var(--text);flex:1}.mod-count{color:var(--text-dim);font-size:.7rem}
 
@@ -83,6 +97,44 @@ a{color:var(--cyan);text-decoration:none}a:hover{text-decoration:underline}
 .summary-card .num{font-size:2rem;font-weight:800}
 .summary-card .label{font-size:.7rem;text-transform:uppercase;letter-spacing:1px;color:var(--text-dim);margin-top:.2rem}
 .sev-critical .num{color:var(--red)}.sev-high .num{color:var(--orange)}.sev-medium .num{color:var(--yellow)}.sev-low .num{color:var(--cyan)}.sev-info .num{color:var(--text-dim)}
+
+/* Auto-attack results */
+.auto-attack-section{margin:2rem 0}
+.auto-attack-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem}
+.atk-result{background:var(--bg2);border:1px solid var(--bg4);border-radius:var(--radius);padding:1rem 1.2rem;margin-bottom:.8rem;transition:all .2s}
+.atk-result.success{border-left:3px solid var(--red)}
+.atk-result.no-exploit{border-left:3px solid var(--text-dim)}
+.atk-result-header{display:flex;align-items:center;gap:.8rem;margin-bottom:.5rem;cursor:pointer}
+.atk-result-name{font-weight:700;color:var(--text-bright);font-size:.95rem;flex:1}
+.atk-result-status{font-size:.7rem;padding:2px 10px;border-radius:4px;font-weight:700;text-transform:uppercase}
+.atk-result-status.exploited{background:rgba(255,64,96,.15);color:var(--red)}
+.atk-result-status.no-exploit{background:rgba(136,136,136,.12);color:var(--text-dim)}
+.atk-result-body{display:none;margin-top:.8rem}
+.atk-result-body.open{display:block}
+.atk-result-summary{font-size:.85rem;color:var(--text);margin-bottom:.5rem}
+.atk-result-creds{display:flex;flex-wrap:wrap;gap:.3rem;margin:.5rem 0}
+.cred-tag{background:rgba(255,64,96,.1);border:1px solid rgba(255,64,96,.3);color:var(--red);padding:3px 8px;border-radius:4px;font-family:monospace;font-size:.8rem}
+.atk-result-output{background:var(--bg);padding:.8rem;border-radius:var(--radius-sm);font-family:monospace;font-size:.75rem;color:var(--green);max-height:200px;overflow-y:auto;white-space:pre-wrap;margin-top:.5rem;border:1px solid var(--bg4)}
+
+/* AI Assessment */
+.assessment-section{margin:2rem 0;background:var(--bg2);border:1px solid var(--purple);border-radius:var(--radius);padding:1.5rem;overflow:hidden}
+.assessment-section h2{color:var(--purple);font-size:1.2rem;margin-bottom:1rem;display:flex;align-items:center;gap:.5rem}
+.assessment-content{font-size:.9rem;line-height:1.7;color:var(--text)}
+.assessment-content h2{color:var(--cyan);font-size:1.1rem;margin:1.5rem 0 .5rem;border-bottom:1px solid var(--bg4);padding-bottom:.3rem}
+.assessment-content h3{color:var(--orange);font-size:1rem;margin:1rem 0 .5rem}
+.assessment-content strong{color:var(--text-bright)}
+.assessment-content code{background:var(--bg);padding:2px 6px;border-radius:4px;font-size:.85em;color:var(--green)}
+.assessment-content pre{background:var(--bg);padding:1rem;border-radius:var(--radius-sm);overflow-x:auto;font-size:.8rem;color:var(--green);margin:.8rem 0;border:1px solid var(--bg4);white-space:pre-wrap}
+.assessment-content ul,.assessment-content ol{margin:.5rem 0 .5rem 1.5rem}
+.assessment-content li{margin:.3rem 0}
+
+/* Report actions */
+.report-actions{display:flex;gap:1rem;margin:1.5rem 0;flex-wrap:wrap}
+.btn-report{padding:.7rem 1.5rem;border:none;border-radius:var(--radius);font-size:.9rem;font-weight:700;cursor:pointer;transition:all .2s;display:inline-flex;align-items:center;gap:.5rem}
+.btn-report-download{background:var(--green);color:#000}
+.btn-report-download:hover{background:#00cc6e;box-shadow:0 0 15px rgba(0,255,136,.3)}
+.btn-report-view{background:var(--purple);color:#fff}
+.btn-report-view:hover{background:var(--purple-dim);box-shadow:0 0 15px var(--purple-glow)}
 
 /* Findings table */
 .section-title{font-size:1.1rem;font-weight:700;color:var(--text-bright);margin:2rem 0 1rem;display:flex;align-items:center;gap:.5rem}
@@ -128,7 +180,7 @@ a{color:var(--cyan);text-decoration:none}a:hover{text-decoration:underline}
 .raw-output{display:none;background:var(--bg);padding:1rem;border-radius:var(--radius-sm);font-family:monospace;font-size:.75rem;color:var(--green);white-space:pre-wrap;max-height:300px;overflow-y:auto;margin-bottom:1rem;border:1px solid var(--bg4)}
 .raw-output.open{display:block}
 
-/* ═══ ARSENAL PAGE ═══ */
+/* === ARSENAL PAGE === */
 .arsenal-page{flex-direction:row!important}
 .sidebar{width:280px;min-width:280px;background:var(--bg2);border-right:1px solid var(--bg4);overflow-y:auto;padding:.5rem 0}
 .sidebar-item{padding:.7rem 1.2rem;cursor:pointer;display:flex;align-items:center;gap:.7rem;font-size:.88rem;transition:all .15s;border-left:3px solid transparent}
@@ -184,6 +236,7 @@ a{color:var(--cyan);text-decoration:none}a:hover{text-decoration:underline}
 @media(max-width:800px){
   .sidebar{display:none}.tools-grid{grid-template-columns:1fr}.header{flex-wrap:wrap}.attacks-grid{grid-template-columns:1fr}
   .target-form{flex-direction:column}.target-input-wrap{min-width:auto}
+  .phase-pipeline{flex-wrap:wrap}
 }
 </style>
 </head>
@@ -197,17 +250,19 @@ a{color:var(--cyan);text-decoration:none}a:hover{text-decoration:underline}
     <div class="tab" data-tab="arsenal">Arsenal</div>
   </div>
   <div class="header-right">
+    <span class="config-badge off" id="cfgAI" title="Set OPENROUTER_API_KEY for Kimi-K2 AI">AI: off</span>
+    <span class="config-badge off" id="cfgMSF" title="Install msfconsole for Metasploit">MSF: off</span>
     <div class="search-box" id="arsenalSearch" style="display:none">
       <input type="text" id="searchInput" placeholder="Search tools..." autocomplete="off">
     </div>
   </div>
 </div>
 
-<!-- ═══ SCAN PAGE ═══ -->
+<!-- === SCAN PAGE === -->
 <div class="page scan-page active" id="page-scan">
   <div class="target-section">
     <h1>Red Team Scanner</h1>
-    <p>Enter a target — the platform runs ALL available tools and produces an attack plan.</p>
+    <p>Full automated pipeline: Discovery &rarr; Scanning &rarr; Exploitation &rarr; Metasploit &rarr; Auto-Attack &rarr; AI Report</p>
     <div class="target-form">
       <div class="target-input-wrap">
         <input class="target-input" type="text" id="targetInput" placeholder="example.com, 192.168.1.1, user@mail.com, @username" autocomplete="off">
@@ -222,6 +277,16 @@ a{color:var(--cyan);text-decoration:none}a:hover{text-decoration:underline}
   </div>
 
   <div class="scan-results" id="scanResults">
+    <!-- Phase Pipeline -->
+    <div class="phase-pipeline" id="phasePipeline">
+      <div class="phase-step" data-phase="recon"><span class="phase-icon">1</span>Recon</div>
+      <div class="phase-step" data-phase="scanning"><span class="phase-icon">2</span>Scanning</div>
+      <div class="phase-step" data-phase="exploitation"><span class="phase-icon">3</span>Exploit Check</div>
+      <div class="phase-step" data-phase="metasploit"><span class="phase-icon">4</span>Metasploit</div>
+      <div class="phase-step" data-phase="auto_attack"><span class="phase-icon">5</span>Auto-Attack</div>
+      <div class="phase-step" data-phase="reporting"><span class="phase-icon">6</span>AI Report</div>
+    </div>
+
     <!-- Progress -->
     <div class="progress-section" id="progressSection">
       <div class="progress-header">
@@ -241,9 +306,34 @@ a{color:var(--cyan);text-decoration:none}a:hover{text-decoration:underline}
       <div class="summary-card sev-info"><div class="num" id="sumInfo">0</div><div class="label">Info</div></div>
     </div>
 
-    <!-- Attacks -->
+    <!-- Report Actions (shown when complete) -->
+    <div id="reportActions" style="display:none">
+      <div class="report-actions">
+        <button class="btn-report btn-report-download" onclick="downloadReport()">Download Full Report (HTML)</button>
+        <button class="btn-report btn-report-view" onclick="viewReport()">View Report in New Tab</button>
+      </div>
+    </div>
+
+    <!-- Auto-Attack Results -->
+    <div id="autoAttackSection" style="display:none">
+      <div class="auto-attack-header">
+        <div class="section-title">Auto-Attack Results</div>
+        <span class="status-text" id="autoAttackStatus"></span>
+      </div>
+      <div id="autoAttackResults"></div>
+    </div>
+
+    <!-- AI Assessment -->
+    <div id="assessmentSection" style="display:none">
+      <div class="assessment-section">
+        <h2>AI Security Assessment</h2>
+        <div class="assessment-content" id="assessmentContent"></div>
+      </div>
+    </div>
+
+    <!-- Attacks (manual) -->
     <div id="attacksSection" style="display:none">
-      <div class="section-title">Attack Options</div>
+      <div class="section-title">All Attack Options (Manual)</div>
       <div class="attacks-grid" id="attacksGrid"></div>
     </div>
 
@@ -264,7 +354,7 @@ a{color:var(--cyan);text-decoration:none}a:hover{text-decoration:underline}
   </div>
 </div>
 
-<!-- ═══ ARSENAL PAGE ═══ -->
+<!-- === ARSENAL PAGE === -->
 <div class="page arsenal-page" id="page-arsenal">
   <div class="sidebar" id="sidebar">
     <div class="sidebar-all" id="showAll">ALL TOOLS</div>
@@ -294,9 +384,10 @@ a{color:var(--cyan);text-decoration:none}a:hover{text-decoration:underline}
 </div>
 
 <script>
-/* ═══════════════════════════════════════════════════════════════════════════
+/* =====================================================================
    HackingTool — Red Team Platform UI
-   ═══════════════════════════════════════════════════════════════════════════ */
+   Full Pipeline: Recon -> Scan -> Exploit -> Metasploit -> Auto-Attack -> Report
+   ===================================================================== */
 
 let DATA = [];
 let activeCategory = -1;
@@ -304,7 +395,22 @@ let currentScanId = null;
 let scanPollInterval = null;
 let currentAttacks = [];
 
-// ── Tabs ──────────────────────────────────────────────────────────────────
+const PHASE_ORDER = ['recon','scanning','exploitation','metasploit','auto_attack','reporting','done'];
+
+// -- Config check --
+async function checkConfig() {
+  try {
+    const res = await fetch('/api/config');
+    const cfg = await res.json();
+    const aiEl = document.getElementById('cfgAI');
+    const msfEl = document.getElementById('cfgMSF');
+    if (cfg.ai_enabled) { aiEl.textContent = 'AI: ' + (cfg.ai_model||'on').split('/').pop(); aiEl.className = 'config-badge on'; }
+    if (cfg.msf_enabled) { msfEl.textContent = 'MSF: on'; msfEl.className = 'config-badge on'; }
+  } catch(e) {}
+}
+checkConfig();
+
+// -- Tabs --
 document.querySelectorAll('.tab').forEach(tab => {
   tab.onclick = () => {
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -315,7 +421,7 @@ document.querySelectorAll('.tab').forEach(tab => {
   };
 });
 
-// ── Target type detection ─────────────────────────────────────────────────
+// -- Target type detection --
 const targetInput = document.getElementById('targetInput');
 const typeBadge = document.getElementById('typeBadge');
 targetInput.addEventListener('input', () => {
@@ -329,7 +435,7 @@ targetInput.addEventListener('input', () => {
 });
 targetInput.addEventListener('keydown', e => { if (e.key === 'Enter') launchScan(); });
 
-// ── Launch Scan ───────────────────────────────────────────────────────────
+// -- Launch Scan --
 async function launchScan() {
   const target = targetInput.value.trim();
   if (!target) return;
@@ -346,7 +452,7 @@ async function launchScan() {
     if (data.error) { alert(data.error); btn.disabled = false; btn.textContent = 'Launch Scan'; return; }
     currentScanId = data.scan_id;
 
-    // Show results area
+    // Reset UI
     document.getElementById('scanResults').classList.add('active');
     document.getElementById('scanTarget').textContent = target;
     document.getElementById('scanStatus').textContent = 'Running...';
@@ -355,10 +461,13 @@ async function launchScan() {
     document.getElementById('attacksSection').style.display = 'none';
     document.getElementById('findingsSection').style.display = 'none';
     document.getElementById('rawSection').style.display = 'none';
+    document.getElementById('autoAttackSection').style.display = 'none';
+    document.getElementById('assessmentSection').style.display = 'none';
+    document.getElementById('reportActions').style.display = 'none';
     document.getElementById('modulesGrid').innerHTML = '';
     document.getElementById('progressBar').style.width = '0%';
+    resetPhases();
 
-    // Poll
     if (scanPollInterval) clearInterval(scanPollInterval);
     scanPollInterval = setInterval(() => pollScan(currentScanId), 1000);
     pollScan(currentScanId);
@@ -368,17 +477,47 @@ async function launchScan() {
   btn.disabled = false; btn.textContent = 'Launch Scan';
 }
 
-// ── Poll scan status ──────────────────────────────────────────────────────
+// -- Phase pipeline UI --
+function resetPhases() {
+  document.querySelectorAll('.phase-step').forEach(el => {
+    el.classList.remove('active','done');
+    el.classList.add('pending');
+  });
+}
+
+function updatePhases(currentPhase) {
+  const steps = document.querySelectorAll('.phase-step');
+  const idx = PHASE_ORDER.indexOf(currentPhase);
+  steps.forEach((step, i) => {
+    const stepPhase = step.dataset.phase;
+    const stepIdx = PHASE_ORDER.indexOf(stepPhase);
+    step.classList.remove('active','done','pending');
+    if (stepIdx < idx) step.classList.add('done');
+    else if (stepIdx === idx) step.classList.add('active');
+    else step.classList.add('pending');
+  });
+}
+
+// -- Poll scan status --
 async function pollScan(scanId) {
   try {
     const res = await fetch('/api/scan/' + scanId);
     const scan = await res.json();
     if (scan.error) return;
 
+    // Phase pipeline
+    updatePhases(scan.progress.phase || scan.phase || 'recon');
+
     // Progress
     const pct = scan.progress.total > 0 ? Math.round((scan.progress.completed / scan.progress.total) * 100) : 0;
     document.getElementById('progressBar').style.width = pct + '%';
-    document.getElementById('scanStatus').textContent = scan.status === 'completed' ? 'Scan Complete' : 'Running: ' + scan.progress.current;
+
+    let statusText = 'Running: ' + scan.progress.current;
+    if (scan.progress.phase === 'auto_attack' && scan.progress.auto_attacks_total > 0) {
+      statusText = `Auto-attacking: ${scan.progress.auto_attacks_done}/${scan.progress.auto_attacks_total} - ${scan.progress.current}`;
+    }
+    if (scan.status === 'completed') statusText = 'Complete - Full pipeline finished';
+    document.getElementById('scanStatus').textContent = statusText;
     if (scan.status === 'completed') {
       document.getElementById('scanStatus').className = 'status-text status-done';
     }
@@ -401,7 +540,52 @@ async function pollScan(scanId) {
       document.getElementById('sumInfo').textContent = scan.summary.info;
     }
 
-    // Attacks
+    // Auto-Attack Results
+    if (scan.attack_results && scan.attack_results.length > 0) {
+      document.getElementById('autoAttackSection').style.display = 'block';
+      const successCount = scan.attack_results.filter(r => r.analysis && r.analysis.success).length;
+      document.getElementById('autoAttackStatus').textContent =
+        `${scan.attack_results.length} executed, ${successCount} successful`;
+      document.getElementById('autoAttackStatus').className =
+        successCount > 0 ? 'status-text status-error' : 'status-text status-done';
+
+      let atkHtml = '';
+      scan.attack_results.forEach((r, idx) => {
+        const isSuccess = r.analysis && r.analysis.success;
+        const statusClass = isSuccess ? 'exploited' : 'no-exploit';
+        const statusLabel = isSuccess ? 'EXPLOITED' : 'NO EXPLOIT';
+        const creds = (r.analysis && r.analysis.credentials) || [];
+        const summary = (r.analysis && r.analysis.summary) || '';
+
+        atkHtml += `<div class="atk-result ${isSuccess ? 'success' : 'no-exploit'}">
+          <div class="atk-result-header" onclick="toggleAtkResult(${idx})">
+            <span class="atk-risk ${r.risk}">${r.risk}</span>
+            <span class="atk-result-name">${esc(r.attack_name)}</span>
+            <span class="atk-result-status ${statusClass}">${statusLabel}</span>
+          </div>
+          <div class="atk-result-body" id="atkResult${idx}">
+            <div class="atk-result-summary">${esc(summary)}</div>
+            ${creds.length ? '<div class="atk-result-creds">' + creds.map(c => `<span class="cred-tag">${esc(c)}</span>`).join('') + '</div>' : ''}
+            <div style="font-size:.75rem;color:var(--text-dim);margin:.3rem 0">$ ${esc(r.command)}</div>
+            <div class="atk-result-output">${esc(r.output || '')}</div>
+          </div>
+        </div>`;
+      });
+      document.getElementById('autoAttackResults').innerHTML = atkHtml;
+    }
+
+    // AI Assessment
+    if (scan.ai_assessment) {
+      document.getElementById('assessmentSection').style.display = 'block';
+      document.getElementById('assessmentContent').innerHTML = renderMarkdown(scan.ai_assessment);
+    }
+
+    // Report actions
+    if (scan.report_html) {
+      document.getElementById('reportActions').style.display = 'block';
+    }
+
+    // Attacks (manual list)
     if (scan.attacks.length > 0) {
       currentAttacks = scan.attacks;
       document.getElementById('attacksSection').style.display = 'block';
@@ -444,15 +628,13 @@ async function pollScan(scanId) {
       document.getElementById('rawSection').style.display = 'block';
       let raw = '';
       for (const [id, m] of Object.entries(scan.modules)) {
-        if (m.raw_output) raw += `\n══ ${m.name} ══\n${m.raw_output}\n`;
+        if (m.raw_output) raw += `\n== ${m.name} ==\n${m.raw_output}\n`;
       }
       document.getElementById('rawOutput').textContent = raw;
     }
 
-    // Update history
     loadHistory();
 
-    // Stop polling when done
     if (scan.status === 'completed') {
       clearInterval(scanPollInterval);
       scanPollInterval = null;
@@ -460,7 +642,53 @@ async function pollScan(scanId) {
   } catch(e) { /* ignore poll errors */ }
 }
 
-// ── Execute attack ────────────────────────────────────────────────────────
+// -- Toggle attack result details --
+function toggleAtkResult(idx) {
+  const el = document.getElementById('atkResult' + idx);
+  if (el) el.classList.toggle('open');
+}
+
+// -- Report actions --
+function downloadReport() {
+  if (currentScanId) {
+    window.location.href = '/api/scan/' + currentScanId + '/report/download';
+  }
+}
+
+function viewReport() {
+  if (currentScanId) {
+    window.open('/api/scan/' + currentScanId + '/report', '_blank');
+  }
+}
+
+// -- Basic markdown renderer --
+function renderMarkdown(md) {
+  if (!md) return '';
+  let html = esc(md);
+  // Code blocks
+  html = html.replace(/```([\s\S]*?)```/g, '<pre>$1</pre>');
+  // Headers
+  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+  // Bold
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  // Italic
+  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+  html = html.replace(/_(.+?)_/g, '<em>$1</em>');
+  // Inline code
+  html = html.replace(/`(.+?)`/g, '<code>$1</code>');
+  // Lists
+  html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
+  html = html.replace(/^(\d+)\. (.+)$/gm, '<li>$2</li>');
+  // Wrap consecutive <li> in <ul>
+  html = html.replace(/((?:<li>.*<\/li>\s*)+)/g, '<ul>$1</ul>');
+  // Paragraphs (lines not already tagged)
+  html = html.replace(/^(?!<[huploe])(.*\S.*)$/gm, '<p>$1</p>');
+  return html;
+}
+
+// -- Execute attack (manual) --
 async function executeAttack(scanId, attackIdx) {
   const attack = currentAttacks[attackIdx];
   if (!attack) return;
@@ -477,7 +705,6 @@ async function executeAttack(scanId, attackIdx) {
   status.className = 'status-text';
   modal.classList.add('active');
 
-  // Build context header
   let ctxHtml = '<div class="term-context">';
   ctxHtml += `<div class="ctx-title">${esc(name)} <span class="ctx-risk ${risk}">${risk}</span></div>`;
   if (context) ctxHtml += `<div class="ctx-what">${esc(context)}</div>`;
@@ -520,7 +747,7 @@ async function executeAttack(scanId, attackIdx) {
   }
 }
 
-// ── Scan history ──────────────────────────────────────────────────────────
+// -- Scan history --
 async function loadHistory() {
   try {
     const res = await fetch('/api/scans');
@@ -529,10 +756,11 @@ async function loadHistory() {
     document.getElementById('scanHistory').style.display = 'block';
     let html = '';
     scans.reverse().slice(0, 10).forEach(s => {
+      const reportIcon = s.has_report ? ' [REPORT]' : '';
       html += `<div class="history-item" onclick="viewScan('${s.id}')">
         <span class="history-target">${esc(s.target)}</span>
         <span class="history-type">${esc(s.target_type)}</span>
-        <span class="history-status ${s.status}">${s.status}</span>
+        <span class="history-status ${s.status}">${s.status}${reportIcon}</span>
       </div>`;
     });
     document.getElementById('historyList').innerHTML = html;
@@ -551,7 +779,7 @@ function toggleRaw() {
   document.getElementById('rawOutput').classList.toggle('open');
 }
 
-// ═══ ARSENAL (existing tool browser) ═════════════════════════════════════
+// === ARSENAL (existing tool browser) ===
 
 async function loadTools() {
   const res = await fetch('/api/tools');
@@ -704,7 +932,7 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') document.getElementById('modal').classList.remove('active');
 });
 
-// ── Init ──────────────────────────────────────────────────────────────────
+// -- Init --
 loadTools();
 loadHistory();
 </script>

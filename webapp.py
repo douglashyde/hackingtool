@@ -271,6 +271,58 @@ def api_scan_execute_attack(scan_id):
     return jsonify({"task_id": task_id})
 
 
+@app.route("/api/scan/<scan_id>/report")
+def api_scan_report(scan_id):
+    """Get the generated HTML pentest report."""
+    scan = scanner.get_scan(scan_id)
+    if not scan:
+        return jsonify({"error": "Scan not found"}), 404
+    report = scan.get("report_html")
+    if not report:
+        return jsonify({"error": "Report not yet generated"}), 404
+    return report, 200, {"Content-Type": "text/html; charset=utf-8"}
+
+
+@app.route("/api/scan/<scan_id>/report/download")
+def api_scan_report_download(scan_id):
+    """Download the report as an HTML file."""
+    scan = scanner.get_scan(scan_id)
+    if not scan:
+        return jsonify({"error": "Scan not found"}), 404
+    report = scan.get("report_html")
+    if not report:
+        return jsonify({"error": "Report not yet generated"}), 404
+    target = scan.get("target", "target").replace("/", "_").replace(":", "_")
+    filename = f"pentest_report_{target}_{scan_id}.html"
+    return report, 200, {
+        "Content-Type": "text/html; charset=utf-8",
+        "Content-Disposition": f'attachment; filename="{filename}"',
+    }
+
+
+@app.route("/api/config")
+def api_config():
+    """Return current configuration status."""
+    try:
+        import ai_engine
+        ai_ok = ai_engine.ai_available()
+        ai_model = os.environ.get("AI_MODEL", "moonshotai/kimi-k2:free")
+    except ImportError:
+        ai_ok = False
+        ai_model = None
+    try:
+        import msf_engine
+        msf_ok = msf_engine.msf_available()
+    except ImportError:
+        msf_ok = False
+    return jsonify({
+        "ai_enabled": ai_ok,
+        "ai_model": ai_model,
+        "msf_enabled": msf_ok,
+        "tools_dir": TOOLS_DIR,
+    })
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Main
 # ══════════════════════════════════════════════════════════════════════════════
