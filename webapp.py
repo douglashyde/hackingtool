@@ -306,7 +306,7 @@ def api_config():
     try:
         import ai_engine
         ai_ok = ai_engine.ai_available()
-        ai_model = os.environ.get("AI_MODEL", "moonshotai/kimi-k2:free")
+        ai_model = ai_engine.AI_MODEL
     except ImportError:
         ai_ok = False
         ai_model = None
