@@ -96,7 +96,7 @@ install_tool() {
     fi
 
     log "Installing $name..."
-    if git clone --depth 1 "$repo" "$TOOLS_DIR/$dir" 2>/dev/null; then
+    if GIT_TERMINAL_PROMPT=0 timeout 60 git clone --depth 1 "$repo" "$TOOLS_DIR/$dir" 2>/dev/null; then
         if [[ -n "$post_install" ]]; then
             (cd "$TOOLS_DIR/$dir" && eval "$post_install" 2>/dev/null) || warn "$name post-install had issues"
         fi
