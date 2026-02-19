@@ -189,8 +189,8 @@ def _prepare_attack(cmd, findings):
     return cmd, None
 
 
-def _run_live(cmd, scan, timeout=120):
-    """Run a command with live output streaming to scan['current_attack']['output']."""
+def _run_live(cmd, attack_state=None, timeout=150):
+    """Run a command with live output streaming to attack_state['output']."""
     try:
         proc = subprocess.Popen(
             cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -199,8 +199,8 @@ def _run_live(cmd, scan, timeout=120):
         start = time.time()
         for line in proc.stdout:
             output += line
-            if scan and scan.get("current_attack"):
-                scan["current_attack"]["output"] = output[-5000:]
+            if attack_state is not None:
+                attack_state["output"] = output[-8000:]
             if time.time() - start > timeout:
                 proc.kill()
                 output += f"\n[Timed out after {timeout}s]\n"
@@ -1111,6 +1111,256 @@ def mod_theharvester(target, tt):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# NEW V5 MODULES — Deeper scanning with nmap NSE, nuclei, ffuf, pure-Python
+# ══════════════════════════════════════════════════════════════════════════════
+
+def mod_nmap_vuln(target, tt):
+    """Deep vulnerability scan using nmap's vuln NSE script category."""
+    if not _tool("nmap"):
+        return {"raw_output": "nmap not installed", "findings": [], "attacks": [], "skipped": True}
+    host = _domain(target) if tt in ("domain", "url") else target
+    F, A = [], []
+    s, e, rc = _run(f"nmap --script vuln -T4 --open {host} 2>&1 | head -500", 600)
+    out = s + e
+
+    for cve in set(re.findall(r'(CVE-\d{4}-\d+)', out)):
+        F.append(_finding("critical", f"NSE Vuln: {cve}", "Confirmed by nmap vuln scripts", module="NMAP-Vuln"))
+        A.append(_attack(f"Exploit {cve}", f"nmap confirmed {cve}",
+            f"searchsploit {cve}", "critical", "exploitation",
+            context=f"Nmap vulnerability scripts confirmed {cve}. This CVE has known exploits.",
+            look_for="Look for Remote Code Execution or Arbitrary File Read exploits."))
+
+    vuln_state = False
+    vuln_name = ""
+    for ln in out.split("\n"):
+        ln_s = ln.strip()
+        if ln_s.endswith(":") and not ln_s.startswith("|") and not ln_s.startswith("PORT"):
+            vuln_name = ln_s.rstrip(":")
+        if "State: VULNERABLE" in ln_s or "VULNERABLE" in ln_s.upper():
+            title = vuln_name or ln_s[:100]
+            F.append(_finding("critical", f"NSE: {title}", ln_s, module="NMAP-Vuln"))
+            vuln_state = True
+        if vuln_state and "References:" in ln_s:
+            vuln_state = False
+
+    return {"raw_output": out[:8000], "findings": F, "attacks": A}
+
+
+def mod_nmap_http(target, tt):
+    """HTTP-specific nmap NSE scripts for web enumeration and vuln checks."""
+    if not _tool("nmap"):
+        return {"raw_output": "nmap not installed", "findings": [], "attacks": [], "skipped": True}
+    host = _domain(target) if tt in ("domain", "url") else target
+    F, A = [], []
+    scripts = "http-enum,http-methods,http-sql-injection,http-shellshock,http-title,http-robots.txt,http-config-backup,http-passwd,http-php-version,http-wordpress-enum,http-git,http-backup-finder"
+    s, e, rc = _run(f"nmap --script '{scripts}' -p 80,443,8080,8443 -T4 {host} 2>&1 | head -400", 300)
+    out = s + e
+    url = _url(target)
+
+    for path in re.findall(r'\|\s+(/\S+?):', out):
+        F.append(_finding("info", f"HTTP Enum: {path}", "Found by nmap http-enum", module="NMAP-HTTP"))
+        if any(p in path.lower() for p in ["/admin", "/login", "/wp-admin", "/manager", "/dashboard", "/panel", "/phpmyadmin"]):
+            F.append(_finding("high", f"Admin/Login page: {path}", "Discovered by nmap NSE", module="NMAP-HTTP"))
+            A.append(_attack(f"Access {path}", f"Admin page at {path}",
+                f"curl -sL '{url}{path}' | head -100", "high", "recon",
+                context=f"Nmap's http-enum script discovered {path}. This is a login or admin interface.",
+                look_for="Check for login forms, default credentials, or version numbers."))
+
+    for m in re.findall(r'Supported Methods:\s*(.+)', out):
+        methods = m.strip()
+        if any(d in methods for d in ["PUT", "DELETE", "TRACE"]):
+            F.append(_finding("high", f"Dangerous HTTP methods: {methods}", "PUT/DELETE/TRACE enabled", module="NMAP-HTTP"))
+            A.append(_attack("HTTP method abuse", f"Methods: {methods}",
+                f"curl -X PUT -d 'test' {url}/test.txt", "high", "exploitation"))
+
+    if "sql-injection" in out.lower() and "possible" in out.lower():
+        F.append(_finding("high", "Possible SQL injection (NSE)", "nmap http-sql-injection flagged", module="NMAP-HTTP"))
+
+    for m in re.findall(r'http-git.*?\.git/(.*?)(?:\n|$)', out, re.I):
+        F.append(_finding("critical", "Git repository exposed", f"/.git/ accessible", module="NMAP-HTTP"))
+        A.append(_attack("Download .git repo", "Source code exposure",
+            f"curl -sk '{url}/.git/config'", "critical", "info_disclosure",
+            context="A .git directory is publicly accessible. This exposes the full source code and commit history.",
+            look_for="Check for credentials in config files, hardcoded passwords, and API keys."))
+
+    return {"raw_output": out[:5000], "findings": F, "attacks": A}
+
+
+def mod_nuclei(target, tt):
+    """Nuclei vulnerability scanner - comprehensive template-based scanning."""
+    if not _tool("nuclei"):
+        return {"raw_output": "nuclei not installed", "findings": [], "attacks": [], "skipped": True}
+    url = _url(target)
+    F, A = [], []
+    s, e, rc = _run(f"nuclei -u {url} -severity critical,high,medium -silent -nc 2>&1 | head -200", 600)
+    out = s + e
+    for ln in out.split("\n"):
+        ln = ln.strip()
+        if not ln:
+            continue
+        m = re.match(r'\[([^\]]+)\]\s*\[([^\]]+)\]\s*\[([^\]]+)\]\s*(.*)', ln)
+        if m:
+            template, proto, sev, target_url = m.groups()
+            sev_map = {"critical": "critical", "high": "high", "medium": "medium", "low": "low", "info": "info"}
+            F.append(_finding(sev_map.get(sev.lower(), "info"), f"Nuclei: {template}", target_url.strip(), module="Nuclei"))
+    return {"raw_output": out[:5000], "findings": F, "attacks": A}
+
+
+def mod_ffuf(target, tt):
+    """FFUF web fuzzer for directory/file discovery."""
+    if not _tool("ffuf"):
+        return {"raw_output": "ffuf not installed", "findings": [], "attacks": [], "skipped": True}
+    url = _url(target)
+    F, A = [], []
+    wordlists = [
+        "/usr/share/wordlists/dirb/common.txt",
+        "/usr/share/seclists/Discovery/Web-Content/common.txt",
+        "/usr/share/dirb/wordlists/common.txt",
+    ]
+    wl = next((w for w in wordlists if os.path.isfile(w)), None)
+    if not wl:
+        return {"raw_output": "No wordlist for ffuf", "findings": [], "attacks": []}
+    s, e, rc = _run(f"ffuf -u {url}/FUZZ -w {wl} -mc 200,301,302,403 -t 40 -s 2>&1 | head -150", 300)
+    out = s + e
+    for ln in out.split("\n"):
+        path = ln.strip()
+        if path and not path.startswith("[") and not path.startswith("::") and len(path) < 200:
+            F.append(_finding("info", f"FFUF: /{path}", "Found by ffuf", module="FFUF"))
+            if any(p in path.lower() for p in ["admin", "login", "dashboard", "panel", "config", "backup", ".env", ".git"]):
+                F.append(_finding("high", f"Interesting: /{path}", "Discovered by ffuf", module="FFUF"))
+    return {"raw_output": out[:5000], "findings": F, "attacks": A}
+
+
+def mod_deep_crawl(target, tt):
+    """Pure Python deep endpoint discovery and sensitive file check."""
+    if not requests:
+        return {"raw_output": "requests unavailable", "findings": [], "attacks": []}
+    url = _url(target)
+    F, A, out = [], [], []
+
+    sensitive_paths = [
+        "/.env", "/.git/config", "/.git/HEAD", "/wp-config.php.bak", "/config.php",
+        "/config.yml", "/config.json", "/.htaccess", "/.htpasswd",
+        "/server-status", "/server-info", "/.svn/entries", "/crossdomain.xml",
+        "/phpinfo.php", "/info.php", "/test.php", "/debug", "/trace",
+        "/api", "/api/v1", "/api/v2", "/graphql", "/graphiql",
+        "/swagger.json", "/openapi.json", "/api-docs",
+        "/elmah.axd", "/web.config", "/WEB-INF/web.xml",
+        "/.DS_Store", "/backup", "/backup.zip", "/backup.sql",
+        "/database.sql", "/dump.sql", "/db.sql",
+        "/admin/config", "/admin/logs", "/logs", "/log",
+        "/.well-known/security.txt", "/security.txt",
+        "/xmlrpc.php", "/wp-json", "/wp-json/wp/v2/users",
+        "/cgi-bin/", "/actuator", "/actuator/env", "/actuator/health",
+        "/console", "/solr/", "/jenkins", "/manager/html",
+        "/_config.yml", "/package.json", "/composer.json",
+        "/wp-content/debug.log", "/error_log", "/error.log",
+    ]
+
+    for path in sensitive_paths:
+        try:
+            r = requests.get(f"{url}{path}", timeout=4, verify=False, allow_redirects=False)
+            if r.status_code == 200 and len(r.text) > 50:
+                out.append(f"[+] {path} -> {r.status_code} ({len(r.text)} bytes)")
+                if path in ("/.env", "/.git/config", "/wp-config.php.bak", "/.htpasswd", "/.git/HEAD"):
+                    F.append(_finding("critical", f"Sensitive file exposed: {path}", f"Accessible, {len(r.text)} bytes", module="DeepCrawl"))
+                    A.append(_attack(f"Download {path}", "Contains sensitive data",
+                        f"curl -sk '{url}{path}'", "critical", "info_disclosure",
+                        context=f"Sensitive file at {path} is publicly readable. May contain database credentials, API keys, or passwords.",
+                        look_for="Look for DB_PASSWORD, API_KEY, SECRET, and connection strings."))
+                elif path.startswith("/api") or path in ("/graphql", "/graphiql", "/swagger.json", "/openapi.json"):
+                    F.append(_finding("medium", f"API endpoint: {path}", f"HTTP {r.status_code}", module="DeepCrawl"))
+                    A.append(_attack(f"Explore API {path}", "Discovered API",
+                        f"curl -sk '{url}{path}' | head -100", "medium", "recon"))
+                elif "backup" in path.lower() or path.endswith(".sql"):
+                    F.append(_finding("critical", f"Backup/database file: {path}", "Potentially full database dump", module="DeepCrawl"))
+                    A.append(_attack(f"Download {path}", "May contain full database",
+                        f"curl -sk '{url}{path}' | head -50", "critical", "info_disclosure"))
+                elif "log" in path.lower() or "debug" in path.lower():
+                    F.append(_finding("high", f"Log/debug exposed: {path}", f"{len(r.text)} bytes", module="DeepCrawl"))
+                    A.append(_attack(f"Read {path}", "May contain stack traces or credentials",
+                        f"curl -sk '{url}{path}' | tail -50", "high", "info_disclosure"))
+                else:
+                    F.append(_finding("medium", f"Exposed path: {path}", f"HTTP {r.status_code}", module="DeepCrawl"))
+            elif r.status_code == 403:
+                F.append(_finding("info", f"Exists (403): {path}", "Restricted but present", module="DeepCrawl"))
+        except Exception:
+            pass
+
+    # Extract links from homepage
+    try:
+        r = requests.get(url, timeout=10, verify=False)
+        links = set(re.findall(r'href=["\']([^"\']+)["\']', r.text))
+        for link in sorted(links):
+            if link.startswith("/") and len(link) < 100 and not link.startswith("//"):
+                F.append(_finding("info", f"Page link: {link}", "Extracted from source", module="DeepCrawl"))
+    except Exception:
+        pass
+
+    return {"raw_output": "\n".join(out) if out else "No sensitive endpoints found", "findings": F, "attacks": A}
+
+
+def mod_cors_check(target, tt):
+    """Check for CORS misconfiguration vulnerabilities."""
+    if not requests:
+        return {"raw_output": "requests unavailable", "findings": [], "attacks": []}
+    url = _url(target)
+    domain = _domain(target)
+    F, A, out = [], [], []
+
+    test_origins = [
+        "https://evil.com",
+        "https://attacker.com",
+        f"https://{domain}.evil.com",
+        "null",
+    ]
+    for origin in test_origins:
+        try:
+            r = requests.get(url, headers={"Origin": origin}, timeout=6, verify=False)
+            acao = r.headers.get("Access-Control-Allow-Origin", "")
+            acac = r.headers.get("Access-Control-Allow-Credentials", "")
+            if acao and (acao == origin or acao == "*"):
+                out.append(f"[+] CORS reflects: {origin} -> ACAO: {acao}, ACAC: {acac}")
+                if acac.lower() == "true":
+                    F.append(_finding("critical", f"CORS: credentials from {origin}",
+                        "Attacker can steal authenticated data cross-origin", module="CORS"))
+                    A.append(_attack("CORS exploitation", f"Credentials from {origin}",
+                        f"curl -sH 'Origin: {origin}' -I {url} | grep -i access-control",
+                        "critical", "client_side",
+                        context=f"Server reflects '{origin}' with credentials. Attacker can make authenticated cross-origin requests.",
+                        look_for="Access-Control-Allow-Origin reflects arbitrary origins WITH Allow-Credentials: true."))
+                else:
+                    F.append(_finding("medium", f"CORS: reflects origin {origin}", acao, module="CORS"))
+        except Exception:
+            pass
+
+    return {"raw_output": "\n".join(out) if out else "No CORS issues", "findings": F, "attacks": A}
+
+
+def mod_nmap_brute(target, tt):
+    """Nmap NSE brute force scripts against discovered services."""
+    if not _tool("nmap"):
+        return {"raw_output": "nmap not installed", "findings": [], "attacks": [], "skipped": True}
+    host = _domain(target) if tt in ("domain", "url") else target
+    F, A = [], []
+    scripts = "ftp-brute,ssh-brute,http-brute,smtp-brute,pop3-brute,imap-brute,telnet-brute,mysql-brute,ms-sql-brute,vnc-brute"
+    s, e, rc = _run(f"nmap --script '{scripts}' --script-args brute.firstonly=true,brute.threads=3 -T4 --open {host} 2>&1 | head -300", 300)
+    out = s + e
+
+    for m in re.finditer(r'(\S+):\s*\n.*?Valid credentials.*?(\S+):(\S+)', out, re.DOTALL):
+        user, passwd = m.group(2), m.group(3)
+        F.append(_finding("critical", f"Credential found: {user}:{passwd}", f"NSE brute via {m.group(1)}", module="NMAP-Brute"))
+    for m in re.finditer(r'Accounts:\s*\n(.*?)(?:\n\n|\Z)', out, re.DOTALL):
+        for cred in re.findall(r'(\S+):(\S+)\s*-\s*Valid', m.group(1)):
+            F.append(_finding("critical", f"Valid cred: {cred[0]}:{cred[1]}", "NSE brute force", module="NMAP-Brute"))
+
+    if any("Valid" in ln or "credentials" in ln.lower() for ln in out.split("\n")):
+        F.append(_finding("high", "NSE brute force found results", "Check raw output", module="NMAP-Brute"))
+
+    return {"raw_output": out[:5000], "findings": F, "attacks": A}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Attack Context Enrichment — adds explanation to attacks from existing modules
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -1269,15 +1519,22 @@ MODULES = [
     {"id":"robots",       "name":"Robots & Sitemap",         "fn":mod_robots,       "types":["domain","url"],             "phase":"recon"},
     {"id":"tech",         "name":"Technology Detection",     "fn":mod_tech,         "types":["domain","url"],             "phase":"recon"},
     {"id":"wafw00f",      "name":"WAF Detection",            "fn":mod_wafw00f,      "types":["domain","url"],             "phase":"recon"},
+    {"id":"cors",         "name":"CORS Misconfiguration",    "fn":mod_cors_check,   "types":["domain","url"],             "phase":"recon"},
     {"id":"ports",        "name":"Basic Port Scan",          "fn":mod_ports_basic,  "types":["domain","url","ip"],        "phase":"recon"},
     # ── Scanning phase ──
     {"id":"nmap",         "name":"NMAP Service Scan",        "fn":mod_nmap,         "types":["domain","url","ip"],        "phase":"scanning"},
+    {"id":"nmap_vuln",    "name":"NMAP Vuln Scripts",        "fn":mod_nmap_vuln,    "types":["domain","url","ip"],        "phase":"scanning"},
+    {"id":"nmap_http",    "name":"NMAP HTTP Enum",           "fn":mod_nmap_http,    "types":["domain","url"],             "phase":"scanning"},
+    {"id":"nmap_brute",   "name":"NMAP NSE Brute Force",     "fn":mod_nmap_brute,   "types":["domain","url","ip"],        "phase":"scanning"},
     {"id":"masscan",      "name":"Masscan Fast Ports",       "fn":mod_masscan,      "types":["domain","url","ip"],        "phase":"scanning"},
     {"id":"nikto",        "name":"Nikto Web Scanner",        "fn":mod_nikto,        "types":["domain","url"],             "phase":"scanning"},
+    {"id":"nuclei",       "name":"Nuclei Vuln Scanner",      "fn":mod_nuclei,       "types":["domain","url"],             "phase":"scanning"},
     {"id":"sublist3r",    "name":"Subdomain Enumeration",    "fn":mod_sublist3r,    "types":["domain","url"],             "phase":"scanning"},
     {"id":"harvester",    "name":"theHarvester OSINT",       "fn":mod_theharvester, "types":["domain","url"],             "phase":"scanning"},
     {"id":"dirb",         "name":"Directory Brute Force",    "fn":mod_dirb,         "types":["domain","url"],             "phase":"scanning"},
     {"id":"gobuster",     "name":"Gobuster Dir Scan",        "fn":mod_gobuster,     "types":["domain","url"],             "phase":"scanning"},
+    {"id":"ffuf",         "name":"FFUF Web Fuzzer",          "fn":mod_ffuf,         "types":["domain","url"],             "phase":"scanning"},
+    {"id":"deep_crawl",   "name":"Deep Endpoint Discovery",  "fn":mod_deep_crawl,   "types":["domain","url"],             "phase":"scanning"},
     {"id":"wpscan",       "name":"WordPress Scanner",        "fn":mod_wpscan,       "types":["domain","url"],             "phase":"scanning"},
     {"id":"admin_enum",   "name":"Admin & User Enumeration", "fn":mod_admin_enum,   "types":["domain","url"],             "phase":"scanning"},
     {"id":"enum4linux",   "name":"SMB/Windows Enum",         "fn":mod_enum4linux,   "types":["domain","url","ip"],        "phase":"scanning"},
@@ -1335,6 +1592,7 @@ def start_scan(target, target_type=None):
         "ai_assessment": None,
         "report_html": None,
         "current_attack": None,
+        "active_attacks": [],
         "summary": {"critical":0,"high":0,"medium":0,"low":0,"info":0},
         "progress": {
             "total": len(applicable) + extra_phases,
@@ -1343,6 +1601,7 @@ def start_scan(target, target_type=None):
             "phase": "recon",
             "auto_attacks_total": 0,
             "auto_attacks_done": 0,
+            "auto_attacks_skipped": 0,
         },
     }
     for m in applicable:
@@ -1443,22 +1702,24 @@ def _execute(scan_id, target, target_type, modules):
     # Re-dedupe attacks after adding MSF attacks
     _dedupe_and_enrich_attacks(scan)
 
-    # ── Phase 5: Auto-Attack Execution ───────────────────────────────────
+    # ── Phase 5: Auto-Attack Execution (CONCURRENT) ─────────────────────
     scan["phase"] = "auto_attack"
     scan["progress"]["phase"] = "auto_attack"
     scan["progress"]["current"] = "Preparing attacks..."
 
-    # Use AI (or rules) to pick which attacks to run
+    # Select ALL attacks (no limit) — use AI to prioritize order, or run all
     if ai_engine:
         selected_indices = ai_engine.select_attacks(
             target, target_type, scan["findings"], scan["attacks"]
         )
     else:
-        # Fallback: select critical/high risk attacks
-        selected_indices = [
-            i for i, a in enumerate(scan["attacks"])
-            if a["risk"] in ("critical", "high")
-        ][:20]
+        selected_indices = []
+
+    # Include ALL attacks not already selected (run everything)
+    all_indices = set(range(len(scan["attacks"])))
+    selected_set = set(selected_indices) if selected_indices else set()
+    remaining = sorted(all_indices - selected_set)
+    selected_indices = (selected_indices or []) + remaining
 
     # Validate and prepare each selected attack command
     attacks_to_run = []
@@ -1478,7 +1739,7 @@ def _execute(scan_id, target, target_type, modules):
     scan["progress"]["auto_attacks_skipped"] = len(skipped_attacks)
 
     scan["modules"]["auto_attack"] = {
-        "name": f"Auto-Attack ({len(attacks_to_run)} executable, {len(skipped_attacks)} skipped)",
+        "name": f"Auto-Attack ({len(attacks_to_run)} running, {len(skipped_attacks)} skipped)",
         "phase": "auto_attack",
         "status": "running",
         "raw_output": "",
@@ -1486,9 +1747,11 @@ def _execute(scan_id, target, target_type, modules):
     }
 
     attack_results = []
-    for idx, (orig_idx, attack, prepared_cmd) in enumerate(attacks_to_run):
-        # Set live tracking for the current attack
-        scan["current_attack"] = {
+    _atk_lock = threading.Lock()
+
+    def _run_single_attack(idx, orig_idx, attack, prepared_cmd):
+        """Execute a single attack (called concurrently)."""
+        attack_state = {
             "name": attack["name"],
             "command": prepared_cmd,
             "risk": attack["risk"],
@@ -1498,16 +1761,18 @@ def _execute(scan_id, target, target_type, modules):
             "index": idx,
             "total": len(attacks_to_run),
         }
-        scan["progress"]["current"] = f"Attacking: {attack['name']} ({idx+1}/{len(attacks_to_run)})"
+        with _atk_lock:
+            scan["active_attacks"].append(attack_state)
+        running_count = len(scan["active_attacks"])
+        scan["progress"]["current"] = f"Running {running_count} attacks concurrently ({scan['progress']['auto_attacks_done']}/{len(attacks_to_run)} done)"
 
         # Execute with live output streaming
-        output, stderr, exit_code = _run_live(prepared_cmd, scan, timeout=120)
+        output, stderr, exit_code = _run_live(prepared_cmd, attack_state, timeout=150)
         if stderr:
             output += stderr
 
-        # Update current attack status
-        scan["current_attack"]["status"] = "analyzing"
-        scan["current_attack"]["output"] = output[-5000:]
+        attack_state["status"] = "analyzing"
+        attack_state["output"] = output[-8000:]
 
         # Analyze result
         if ai_engine:
@@ -1521,16 +1786,21 @@ def _execute(scan_id, target, target_type, modules):
             "attack_name": attack["name"],
             "attack_index": orig_idx,
             "command": prepared_cmd,
-            "output": output[:5000],
+            "output": output[:8000],
             "exit_code": exit_code,
             "risk": attack["risk"],
             "category": attack.get("category", ""),
             "analysis": analysis,
         }
-        attack_results.append(result)
-        scan["attack_results"] = list(attack_results)  # live update for UI polling
 
-        # If we found new credentials or confirmed vulns, add to findings
+        with _atk_lock:
+            attack_results.append(result)
+            scan["attack_results"] = list(attack_results)
+            if attack_state in scan["active_attacks"]:
+                scan["active_attacks"].remove(attack_state)
+            scan["progress"]["auto_attacks_done"] += 1
+
+        # Add findings from successful attacks
         if analysis.get("credentials"):
             for cred in analysis["credentials"]:
                 scan["findings"].append(_finding(
@@ -1556,10 +1826,21 @@ def _execute(scan_id, target, target_type, modules):
                 module="Auto-Attack",
             ))
 
-        scan["progress"]["auto_attacks_done"] = idx + 1
+    # Run ALL attacks concurrently with 5 workers
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        futures = {}
+        for idx, (orig_idx, attack, prepared_cmd) in enumerate(attacks_to_run):
+            fut = pool.submit(_run_single_attack, idx, orig_idx, attack, prepared_cmd)
+            futures[fut] = attack["name"]
+        for fut in as_completed(futures):
+            try:
+                fut.result()
+            except Exception:
+                pass
 
-    # Clear live attack tracker
+    # Clear live attack trackers
     scan["current_attack"] = None
+    scan["active_attacks"] = []
 
     # Add skip info to raw output
     skip_info = ""
@@ -1572,10 +1853,10 @@ def _execute(scan_id, target, target_type, modules):
     scan["modules"]["auto_attack"]["status"] = "completed"
     scan["modules"]["auto_attack"]["raw_output"] = skip_info + "\n".join(
         f"=== {r['attack_name']} (exit:{r['exit_code']}) ===\n"
-        f"$ {r['command']}\n{r['output'][:1000]}\n"
+        f"$ {r['command']}\n{r['output'][:2000]}\n"
         f"Analysis: {r['analysis'].get('summary','')}\n"
         for r in attack_results
-    )[:10000]
+    )[:15000]
     scan["modules"]["auto_attack"]["findings_count"] = sum(
         1 for r in attack_results if r["analysis"].get("success")
     )
@@ -1698,7 +1979,7 @@ def _basic_analyze_result(attack_name, command, output, exit_code):
 
 
 def _fallback_assessment(scan):
-    """Generate assessment without AI engine."""
+    """Generate detailed assessment without AI engine."""
     target = scan["target"]
     findings = scan["findings"]
     attack_results = scan["attack_results"]
@@ -1713,33 +1994,116 @@ def _fallback_assessment(scan):
 
     lines = [
         f"## Executive Summary\n",
-        f"Assessment of **{target}** found {len(findings)} issues: "
-        f"{s['critical']} critical, {s['high']} high, {s['medium']} medium. "
-        f"{len(successful)} of {len(attack_results)} auto-attacks succeeded.\n",
+        f"Comprehensive security assessment of **{target}** completed. "
+        f"Discovered **{len(findings)} total findings**: "
+        f"**{s['critical']} critical**, **{s['high']} high**, **{s['medium']} medium**, "
+        f"{s['low']} low, {s['info']} informational. "
+        f"Executed **{len(attack_results)} automated attacks** ({len(successful)} successful). "
+        f"Found **{len(set(creds))}** credential(s).\n",
         f"\n## Risk Rating: {risk}\n",
-        "\n## Critical Findings\n",
     ]
-    for f in [f for f in findings if f["severity"] in ("critical", "high")][:15]:
-        lines.append(f"- **[{f['severity'].upper()}]** {f['title']}: {f['detail']}")
+    if risk == "CRITICAL":
+        lines.append("Critical vulnerabilities were confirmed through automated exploitation.\n")
+    elif risk == "HIGH":
+        lines.append("Multiple high-severity vulnerabilities present significant risk to the target.\n")
+
+    # Admin/Login pages
+    logins = [f for f in findings if any(k in f["title"].lower() for k in ["login", "admin", "panel", "dashboard"])]
+    if logins:
+        lines.append("\n## Discovered Admin & Login Pages\n")
+        for f in logins:
+            lines.append(f"- **{f['title']}** — {f['detail']} _(Module: {f['module']})_")
+
+    # Usernames
+    users = [f for f in findings if any(k in f["title"].lower() for k in ["user", "username", "wp user", "account"])]
+    if users:
+        lines.append("\n\n## Exposed Usernames & Accounts\n")
+        for f in users:
+            lines.append(f"- **{f['title']}** — {f['detail']} _(Module: {f['module']})_")
+
+    # Critical findings
+    lines.append("\n\n## Critical Findings\n")
+    crits = [f for f in findings if f["severity"] in ("critical", "high")]
+    if crits:
+        for i, f in enumerate(crits[:30], 1):
+            ev = f" Evidence: `{f['evidence'][:100]}`" if f.get("evidence") else ""
+            lines.append(f"{i}. **[{f['severity'].upper()}]** {f['title']}: {f['detail']} _(Module: {f['module']})_{ev}")
+    else:
+        lines.append("No critical or high-severity findings.")
+
+    # Successful attacks
     lines.append("\n\n## Successful Attacks\n")
     if successful:
         for r in successful:
             a = r.get("analysis", {})
-            lines.append(f"- **{r['attack_name']}**: {a.get('summary','Succeeded')}")
+            lines.append(f"### {r['attack_name']}\n")
+            lines.append(f"- **Command:** `{r['command']}`")
+            lines.append(f"- **Result:** {a.get('summary','Succeeded')}")
             if a.get("access_gained"):
-                lines.append(f"  - Access: {a['access_gained']}")
+                lines.append(f"- **Access gained:** {a['access_gained']}")
+            if a.get("credentials"):
+                lines.append(f"- **Credentials:** {', '.join(f'`{c}`' for c in a['credentials'])}")
+            lines.append(f"- **Output:**\n```\n{r['output'][:1500]}\n```\n")
     else:
-        lines.append("No attacks confirmed exploitation.")
+        lines.append("No attacks resulted in confirmed exploitation.")
+
     if creds:
-        lines.append("\n\n## Credentials Found\n")
+        lines.append("\n\n## Credentials Discovered\n")
         for c in set(creds):
             lines.append(f"- `{c}`")
-    lines.append("\n\n## Remediation\n")
-    lines.append("1. Patch all critical vulnerabilities immediately")
-    lines.append("2. Reset compromised credentials")
-    lines.append("3. Restrict exposed services with firewall rules")
-    lines.append("4. Implement missing security headers")
-    lines.append("5. Update all outdated software")
+
+    # Attack Surface
+    lines.append("\n\n## Attack Surface Analysis\n")
+    ports = [f for f in findings if "Port" in f["title"] or f["module"] in ("NMAP", "Masscan", "PortScan")]
+    if ports:
+        lines.append(f"**{len(ports)} network services discovered:**\n")
+        for f in ports[:20]:
+            lines.append(f"- {f['title']}: {f['detail']}")
+
+    # Web vulns
+    web_vulns = [f for f in findings if f["module"] in ("Headers", "CORS", "Nikto", "SQLMap", "XSStrike", "Commix", "NMAP-HTTP")]
+    if web_vulns:
+        lines.append("\n\n## Web Application Vulnerabilities\n")
+        for f in web_vulns:
+            lines.append(f"- **[{f['severity'].upper()}]** {f['title']}: {f['detail']} _(Module: {f['module']})_")
+
+    # All attack results
+    lines.append("\n\n## All Attack Results\n")
+    for r in attack_results:
+        a = r.get("analysis", {})
+        status = "SUCCESS" if a.get("success") else "NO EXPLOIT"
+        lines.append(f"\n### {r['attack_name']} [{status}]\n")
+        lines.append(f"```\n$ {r['command']}\n{r['output'][:2000]}\n```")
+        if a.get("summary"):
+            lines.append(f"\n**Analysis:** {a['summary']}")
+
+    # Remediation
+    lines.append("\n\n## Remediation Priorities\n")
+    remediation = []
+    if s["critical"] > 0:
+        remediation.append("Immediately patch all critical vulnerabilities")
+    if creds:
+        remediation.append("Reset all compromised credentials and enforce strong password policy")
+    if logins:
+        remediation.append("Restrict access to admin panels — add IP whitelisting and MFA")
+    if users:
+        remediation.append("Disable username enumeration on login forms and APIs")
+    if any("Missing" in f["title"] for f in findings):
+        remediation.append("Implement missing security headers (HSTS, CSP, X-Frame-Options)")
+    if any("outdated" in f["title"].lower() for f in findings):
+        remediation.append("Update all outdated software to latest versions")
+    remediation.append("Conduct application-layer code review for injection vulnerabilities")
+    remediation.append("Implement network segmentation and intrusion detection")
+    for i, r in enumerate(remediation, 1):
+        lines.append(f"{i}. {r}")
+
+    lines.append("\n\n## Next Steps\n")
+    lines.append("1. Validate all critical findings manually")
+    lines.append("2. Attempt privilege escalation from any compromised accounts")
+    lines.append("3. Test for lateral movement across discovered services")
+    lines.append("4. Perform deeper fuzzing on discovered web endpoints")
+    lines.append("5. Run targeted Metasploit exploits against confirmed vulnerabilities")
+
     return "\n".join(lines)
 
 

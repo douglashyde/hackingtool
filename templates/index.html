@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>HackingTool — Red Team Platform</title>
+<title>HackingTool v.5 — Red Team Platform</title>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -20,7 +20,9 @@ a{color:var(--cyan);text-decoration:none}a:hover{text-decoration:underline}
 
 /* Header */
 .header{background:linear-gradient(135deg,var(--bg2),var(--bg3));border-bottom:2px solid var(--purple);padding:.8rem 2rem;display:flex;align-items:center;gap:1.5rem;position:sticky;top:0;z-index:100;box-shadow:0 4px 30px rgba(123,97,255,.15)}
-.logo{font-size:1.4rem;font-weight:800;letter-spacing:2px;color:var(--purple);text-transform:uppercase;white-space:nowrap}.logo span{color:var(--cyan)}
+.logo{font-size:1.4rem;font-weight:800;letter-spacing:2px;color:var(--purple);text-transform:uppercase;white-space:nowrap;display:flex;align-items:center;gap:.5rem}.logo span{color:var(--cyan)}
+.version-badge{background:linear-gradient(135deg,var(--red),var(--orange));color:#fff;font-size:.6rem;padding:3px 8px;border-radius:4px;letter-spacing:1px;font-weight:800;text-transform:uppercase;animation:vbadge 3s ease-in-out infinite}
+@keyframes vbadge{0%,100%{box-shadow:0 0 8px rgba(255,64,96,.4)}50%{box-shadow:0 0 16px rgba(255,138,64,.6)}}
 .tab-bar{display:flex;gap:0;margin-left:2rem}
 .tab{padding:.6rem 1.5rem;cursor:pointer;font-size:.85rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-dim);border-bottom:3px solid transparent;transition:all .2s}
 .tab:hover{color:var(--text-bright)}
@@ -125,6 +127,20 @@ a{color:var(--cyan);text-decoration:none}a:hover{text-decoration:underline}
 .atk-progress-fill{flex:1;height:6px;background:var(--bg4);border-radius:3px;overflow:hidden}
 .atk-progress-fill div{height:100%;background:linear-gradient(90deg,var(--yellow),var(--red));border-radius:3px;transition:width .3s}
 .atk-progress-text{font-size:.8rem;color:var(--text-dim);white-space:nowrap}
+
+/* Concurrent attack grid */
+.concurrent-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(350px,1fr));gap:.6rem;margin:.8rem 0}
+.concurrent-card{background:var(--bg2);border:1px solid var(--yellow);border-radius:var(--radius-sm);padding:.6rem .8rem;animation:border-pulse 2s infinite}
+.concurrent-card .cc-header{display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem}
+.concurrent-card .cc-name{font-size:.82rem;font-weight:700;color:var(--text-bright);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.concurrent-card .cc-status{font-size:.65rem;padding:2px 8px;border-radius:4px;font-weight:700;text-transform:uppercase;background:rgba(255,215,64,.15);color:var(--yellow);animation:pulse 1s infinite}
+.concurrent-card .cc-status.analyzing{background:rgba(123,97,255,.15);color:var(--purple)}
+.concurrent-card .cc-output{font-family:monospace;font-size:.68rem;color:var(--green);background:var(--bg);padding:.4rem;border-radius:4px;max-height:100px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;border:1px solid var(--bg4)}
+.concurrent-card .cc-cmd{font-size:.65rem;color:var(--text-dim);margin-bottom:.3rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.concurrent-stats{display:flex;gap:1rem;align-items:center;margin:.5rem 0;flex-wrap:wrap}
+.concurrent-stats .cs-item{font-size:.78rem;display:flex;align-items:center;gap:.3rem}
+.cs-dot{width:8px;height:8px;border-radius:50%}
+.cs-dot.running{background:var(--yellow);animation:pulse 1s infinite}.cs-dot.done{background:var(--green)}.cs-dot.skip{background:var(--text-dim)}.cs-dot.fail{background:var(--red)}
 
 /* AI Assessment */
 .assessment-section{margin:2rem 0;background:var(--bg2);border:1px solid var(--purple);border-radius:var(--radius);padding:1.5rem;overflow:hidden}
@@ -254,7 +270,7 @@ a{color:var(--cyan);text-decoration:none}a:hover{text-decoration:underline}
 
 <!-- HEADER -->
 <div class="header">
-  <div class="logo">Hacking<span>Tool</span></div>
+  <div class="logo"><span class="version-badge">v.5</span> Hacking<span>Tool</span></div>
   <div class="tab-bar">
     <div class="tab active" data-tab="scan">Scan</div>
     <div class="tab" data-tab="arsenal">Arsenal</div>
@@ -271,8 +287,8 @@ a{color:var(--cyan);text-decoration:none}a:hover{text-decoration:underline}
 <!-- === SCAN PAGE === -->
 <div class="page scan-page active" id="page-scan">
   <div class="target-section">
-    <h1>Red Team Scanner</h1>
-    <p>Full automated pipeline: Discovery &rarr; Scanning &rarr; Exploitation &rarr; Metasploit &rarr; Auto-Attack &rarr; AI Report</p>
+    <h1>Red Team Scanner <span style="font-size:.5em;color:var(--red);font-weight:400">v.5</span></h1>
+    <p>Full concurrent pipeline: Discovery &rarr; Deep Scan &rarr; Exploitation &rarr; Metasploit &rarr; Concurrent Auto-Attack &rarr; AI Report</p>
     <div class="target-form">
       <div class="target-input-wrap">
         <input class="target-input" type="text" id="targetInput" placeholder="example.com, 192.168.1.1, user@mail.com, @username" autocomplete="off">
@@ -550,9 +566,10 @@ async function pollScan(scanId) {
       document.getElementById('sumInfo').textContent = scan.summary.info;
     }
 
-    // Auto-Attack Results — live updates
+    // Auto-Attack Results — live concurrent updates
     const hasResults = scan.attack_results && scan.attack_results.length > 0;
-    const hasLiveAttack = scan.current_attack !== null && scan.current_attack !== undefined;
+    const activeAttacks = scan.active_attacks || [];
+    const hasLiveAttack = activeAttacks.length > 0 || (scan.current_attack !== null && scan.current_attack !== undefined);
     const inAutoAttack = scan.phase === 'auto_attack' || scan.progress.phase === 'auto_attack';
 
     if (hasResults || hasLiveAttack || inAutoAttack) {
@@ -561,10 +578,14 @@ async function pollScan(scanId) {
       const total = scan.progress.auto_attacks_total || 0;
       const done = scan.progress.auto_attacks_done || 0;
       const skipped = scan.progress.auto_attacks_skipped || 0;
+      const running = activeAttacks.length;
 
       let statusText = '';
-      if (scan.phase === 'auto_attack' || scan.progress.phase === 'auto_attack') {
-        statusText = `${done}/${total} executed` + (skipped ? `, ${skipped} skipped` : '') + (successCount ? `, ${successCount} exploited` : '');
+      if (inAutoAttack) {
+        statusText = `${done}/${total} done`;
+        if (running > 0) statusText += `, ${running} running`;
+        if (skipped) statusText += `, ${skipped} skipped`;
+        if (successCount) statusText += `, ${successCount} exploited`;
       } else {
         statusText = `${(scan.attack_results||[]).length} executed` + (skipped ? `, ${skipped} skipped` : '') + `, ${successCount} successful`;
       }
@@ -574,13 +595,39 @@ async function pollScan(scanId) {
 
       let atkHtml = '';
 
-      // Progress bar during auto-attack
+      // Progress bar + stats during auto-attack
       if (inAutoAttack && total > 0) {
         const pctAtk = Math.round((done / total) * 100);
         atkHtml += `<div class="atk-progress-bar">
           <div class="atk-progress-fill"><div style="width:${pctAtk}%"></div></div>
-          <span class="atk-progress-text">${done}/${total} attacks</span>
+          <span class="atk-progress-text">${done}/${total} attacks (${pctAtk}%)</span>
         </div>`;
+        atkHtml += `<div class="concurrent-stats">
+          <div class="cs-item"><span class="cs-dot running"></span> ${running} running</div>
+          <div class="cs-item"><span class="cs-dot done"></span> ${done} done</div>
+          <div class="cs-item"><span class="cs-dot skip"></span> ${skipped} skipped</div>
+          ${successCount ? `<div class="cs-item"><span class="cs-dot fail"></span> ${successCount} exploited</div>` : ''}
+        </div>`;
+      }
+
+      // Concurrent running attacks grid
+      if (activeAttacks.length > 0) {
+        atkHtml += '<div class="concurrent-grid">';
+        activeAttacks.forEach(ca => {
+          const statusCls = ca.status === 'analyzing' ? 'analyzing' : '';
+          const statusLabel = ca.status === 'analyzing' ? 'ANALYZING' : 'RUNNING';
+          const lastLines = (ca.output || 'Waiting...').split('\n').slice(-6).join('\n');
+          atkHtml += `<div class="concurrent-card">
+            <div class="cc-header">
+              <span class="atk-risk ${ca.risk||'high'}">${esc(ca.risk||'')}</span>
+              <span class="cc-name">${esc(ca.name)}</span>
+              <span class="cc-status ${statusCls}">${statusLabel}</span>
+            </div>
+            <div class="cc-cmd">$ ${esc(ca.command||'')}</div>
+            <div class="cc-output">${esc(lastLines)}</div>
+          </div>`;
+        });
+        atkHtml += '</div>';
       }
 
       // Completed attack results
@@ -606,27 +653,10 @@ async function pollScan(scanId) {
         </div>`;
       });
 
-      // Live current attack (streaming output)
-      if (hasLiveAttack) {
-        const ca = scan.current_attack;
-        const liveStatus = ca.status === 'analyzing' ? 'ANALYZING...' : 'RUNNING...';
-        const liveStatusClass = ca.status === 'analyzing' ? 'analyzing' : 'running';
-        atkHtml += `<div class="atk-result running">
-          <div class="atk-result-header">
-            <span class="atk-risk ${ca.risk||'high'}">${esc(ca.risk||'')}</span>
-            <span class="atk-result-name">${esc(ca.name)} (${(ca.index||0)+1}/${ca.total||'?'})</span>
-            <span class="atk-result-status ${liveStatusClass}">${liveStatus}</span>
-          </div>
-          <div style="font-size:.75rem;color:var(--text-dim);margin:.3rem 0">$ ${esc(ca.command||'')}</div>
-          <div class="atk-live-output" id="liveAtkOutput">${esc(ca.output || 'Waiting for output...')}</div>
-        </div>`;
-      }
-
       document.getElementById('autoAttackResults').innerHTML = atkHtml;
 
-      // Auto-scroll live output
-      const liveOut = document.getElementById('liveAtkOutput');
-      if (liveOut) liveOut.scrollTop = liveOut.scrollHeight;
+      // Auto-scroll concurrent outputs
+      document.querySelectorAll('.cc-output').forEach(el => el.scrollTop = el.scrollHeight);
     }
 
     // AI Assessment

@@ -154,6 +154,21 @@ SERVICE_MODULES = {
             "module": "auxiliary/scanner/http/title",
             "options": {"THREADS": "4"},
         },
+        {
+            "name": "HTTP Backup File Finder",
+            "module": "auxiliary/scanner/http/backup_file",
+            "options": {"THREADS": "4"},
+        },
+        {
+            "name": "HTTP PUT Upload Check",
+            "module": "auxiliary/scanner/http/http_put",
+            "options": {"THREADS": "4"},
+        },
+        {
+            "name": "Apache Struts Detection",
+            "module": "auxiliary/scanner/http/apache_normalize_path",
+            "options": {"THREADS": "4"},
+        },
     ],
     "ssl": [
         {
@@ -295,6 +310,16 @@ def _cve_to_module(cve):
                           "options": {}, "critical": True, "check_only": True},
         "CVE-2021-44228": {"name": "Log4Shell", "module": "exploit/multi/http/log4shell_header_injection",
                            "options": {}, "critical": True, "check_only": True},
+        "CVE-2021-41773": {"name": "Apache Path Traversal", "module": "exploit/multi/http/apache_normalize_path_rce",
+                           "options": {}, "critical": True, "check_only": True},
+        "CVE-2023-44487": {"name": "HTTP/2 Rapid Reset", "module": "auxiliary/dos/http/http2_rapid_reset",
+                           "options": {}, "critical": True, "check_only": True},
+        "CVE-2020-1938": {"name": "Ghostcat (Tomcat AJP)", "module": "exploit/linux/http/apache_tomcat_ajp_lfi",
+                          "options": {}, "critical": True, "check_only": True},
+        "CVE-2019-11510": {"name": "Pulse Secure VPN RCE", "module": "auxiliary/scanner/http/pulse_ssl_vpn",
+                           "options": {}, "critical": True},
+        "CVE-2021-26855": {"name": "ProxyLogon Exchange", "module": "exploit/windows/http/exchange_proxylogon_rce",
+                           "options": {}, "critical": True, "check_only": True},
     }
     return cve_map.get(cve)
 
@@ -400,7 +425,7 @@ def run_scan(host, findings, max_modules=10, callback=None):
     if not msf_available():
         return []
 
-    modules = get_modules_for_findings(findings)[:max_modules]
+    modules = get_modules_for_findings(findings)[:max_modules * 2]  # v5: run more modules
     results = []
 
     for mod in modules:

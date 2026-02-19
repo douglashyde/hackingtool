@@ -120,8 +120,8 @@ def _ai_select_attacks(target, findings, attacks):
                 "2. Information gathering from discovered services\n"
                 "3. Credential attacks against discovered login pages\n"
                 "4. Service-specific exploits for confirmed vulnerabilities\n"
-                "Return ONLY a JSON array of attack indices in priority order. Example: [0,3,7]\n"
-                "Limit to 15 max. No other text."
+                "Return ONLY a JSON array of attack indices in priority order. Example: [0,3,7,12,15]\n"
+                "Include ALL viable attacks — no limit. Run everything that could yield results. No other text."
             ),
         },
         {
@@ -143,19 +143,18 @@ def _ai_select_attacks(target, findings, attacks):
 
 
 def _rule_select_attacks(attacks):
-    """Rule-based fallback: select all critical/high attacks + some medium."""
+    """Rule-based fallback: select ALL executable attacks, prioritized by risk."""
     selected = []
     for i, a in enumerate(attacks):
         if a["risk"] in ("critical", "high"):
             selected.append(i)
-        elif a["risk"] == "medium" and a["category"] in (
-            "exploitation",
-            "brute_force",
-            "access",
-            "injection",
-        ):
+    for i, a in enumerate(attacks):
+        if i not in selected and a["risk"] == "medium":
             selected.append(i)
-    return selected[:15]
+    for i, a in enumerate(attacks):
+        if i not in selected:
+            selected.append(i)
+    return selected
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -271,8 +270,9 @@ def generate_assessment(target, target_type, findings, attacks, attack_results):
 def _ai_assessment(target, target_type, findings, attacks, attack_results):
     """AI-powered full security assessment."""
     findings_text = "\n".join(
-        f"[{f['severity'].upper()}] {f['title']}: {f['detail']} ({f['module']})"
-        for f in findings[:100]
+        f"[{f['severity'].upper()}] {f['title']}: {f['detail']} (Module: {f['module']})"
+        + (f"\n  Evidence: {f['evidence']}" if f.get('evidence') else "")
+        for f in findings[:200]
     )
     results_text = "\n".join(
         f"--- {r['attack_name']} (exit:{r['exit_code']}) ---\n"
@@ -280,25 +280,33 @@ def _ai_assessment(target, target_type, findings, attacks, attack_results):
         f"Success: {r.get('analysis', {}).get('success', '?')}\n"
         f"Summary: {r.get('analysis', {}).get('summary', 'N/A')}\n"
         f"Credentials: {r.get('analysis', {}).get('credentials', [])}\n"
-        f"Output excerpt: {r['output'][:1000]}\n"
-        for r in attack_results[:20]
+        f"Vulns confirmed: {r.get('analysis', {}).get('vulns_confirmed', [])}\n"
+        f"Access gained: {r.get('analysis', {}).get('access_gained', 'None')}\n"
+        f"Output excerpt: {r['output'][:2000]}\n"
+        for r in attack_results[:30]
     )
     messages = [
         {
             "role": "system",
             "content": (
-                "You are a senior penetration tester writing a professional security assessment report. "
-                "Analyze all findings and attack results. Structure your response EXACTLY as:\n\n"
-                "## Executive Summary\n[2-3 sentences on overall security posture]\n\n"
-                "## Risk Rating: [CRITICAL/HIGH/MEDIUM/LOW]\n[1 sentence justification]\n\n"
-                "## Critical Findings\n[Numbered list of most severe issues with evidence]\n\n"
-                "## Successful Attacks\n[Detail each attack that succeeded, what access was gained]\n\n"
-                "## Attack Surface Analysis\n[What vectors are available, services exposed]\n\n"
-                "## Credentials Discovered\n[List all found credentials and where they work]\n\n"
-                "## Remediation Priorities\n[Numbered list, most urgent first]\n\n"
-                "## Detailed Technical Findings\n[Full technical details organized by severity]\n\n"
-                "## Next Steps for Further Testing\n[What a tester should do next]\n\n"
-                "Be specific. Reference actual data from the results. Use markdown formatting."
+                "You are a senior penetration tester writing a comprehensive professional security assessment report. "
+                "Analyze ALL findings and ALL attack results thoroughly. Be SPECIFIC — reference actual URLs, paths, "
+                "ports, usernames, response codes, and tool output. Structure your response EXACTLY as:\n\n"
+                "## Executive Summary\n[3-5 sentences with specific numbers and key findings]\n\n"
+                "## Risk Rating: [CRITICAL/HIGH/MEDIUM/LOW]\n[Detailed justification with evidence]\n\n"
+                "## Critical Findings\n[Numbered list of ALL severe issues with exact evidence, paths, URLs]\n\n"
+                "## Discovered Admin & Login Pages\n[List every admin/login page found with exact URLs and what was discovered]\n\n"
+                "## Exposed Usernames & Accounts\n[List EVERY username found, how it was found, and what service it applies to]\n\n"
+                "## Successful Attacks\n[Detail EVERY attack that succeeded with full output analysis]\n\n"
+                "## Attack Surface Analysis\n[Every open port, service, version, and potential attack vector]\n\n"
+                "## Credentials Discovered\n[List ALL found credentials and exactly where they work]\n\n"
+                "## Web Application Vulnerabilities\n[XSS, SQLi, CORS, missing headers, etc. with evidence]\n\n"
+                "## Infrastructure Vulnerabilities\n[Outdated software, misconfigurations, exposed services]\n\n"
+                "## Remediation Priorities\n[Numbered list, most urgent first, with specific actions]\n\n"
+                "## Detailed Technical Findings\n[Full technical details for EVERY finding, organized by severity]\n\n"
+                "## Next Steps for Further Testing\n[Specific next actions with exact commands to run]\n\n"
+                "Be extremely specific. Reference actual data from the results. Show exact paths, ports, "
+                "usernames, and evidence. Use markdown formatting. Do NOT be vague."
             ),
         },
         {
@@ -310,7 +318,7 @@ def _ai_assessment(target, target_type, findings, attacks, attack_results):
             f"Generate the full security assessment report.",
         },
     ]
-    return _ai_call(messages, temperature=0.4, max_tokens=6000)
+    return _ai_call(messages, temperature=0.4, max_tokens=8000)
 
 
 def _rule_assessment(target, target_type, findings, attacks, attack_results):
