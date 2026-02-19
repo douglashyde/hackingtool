@@ -115,6 +115,16 @@ a{color:var(--cyan);text-decoration:none}a:hover{text-decoration:underline}
 .atk-result-creds{display:flex;flex-wrap:wrap;gap:.3rem;margin:.5rem 0}
 .cred-tag{background:rgba(255,64,96,.1);border:1px solid rgba(255,64,96,.3);color:var(--red);padding:3px 8px;border-radius:4px;font-family:monospace;font-size:.8rem}
 .atk-result-output{background:var(--bg);padding:.8rem;border-radius:var(--radius-sm);font-family:monospace;font-size:.75rem;color:var(--green);max-height:200px;overflow-y:auto;white-space:pre-wrap;margin-top:.5rem;border:1px solid var(--bg4)}
+.atk-result.running{border-left:3px solid var(--yellow);background:rgba(255,215,64,.03)}
+.atk-result-status.running{background:rgba(255,215,64,.15);color:var(--yellow);animation:pulse 1s infinite}
+.atk-result-status.analyzing{background:rgba(123,97,255,.15);color:var(--purple);animation:pulse 1s infinite}
+.atk-result-status.skipped{background:rgba(136,136,136,.12);color:var(--text-dim)}
+.atk-live-output{background:var(--bg);padding:.8rem;border-radius:var(--radius-sm);font-family:monospace;font-size:.75rem;color:var(--green);max-height:250px;overflow-y:auto;white-space:pre-wrap;margin-top:.5rem;border:1px solid var(--yellow);animation:border-pulse 2s infinite}
+@keyframes border-pulse{0%,100%{border-color:var(--yellow)}50%{border-color:var(--bg4)}}
+.atk-progress-bar{margin:1rem 0;display:flex;align-items:center;gap:1rem}
+.atk-progress-fill{flex:1;height:6px;background:var(--bg4);border-radius:3px;overflow:hidden}
+.atk-progress-fill div{height:100%;background:linear-gradient(90deg,var(--yellow),var(--red));border-radius:3px;transition:width .3s}
+.atk-progress-text{font-size:.8rem;color:var(--text-dim);white-space:nowrap}
 
 /* AI Assessment */
 .assessment-section{margin:2rem 0;background:var(--bg2);border:1px solid var(--purple);border-radius:var(--radius);padding:1.5rem;overflow:hidden}
@@ -540,17 +550,41 @@ async function pollScan(scanId) {
       document.getElementById('sumInfo').textContent = scan.summary.info;
     }
 
-    // Auto-Attack Results
-    if (scan.attack_results && scan.attack_results.length > 0) {
+    // Auto-Attack Results — live updates
+    const hasResults = scan.attack_results && scan.attack_results.length > 0;
+    const hasLiveAttack = scan.current_attack !== null && scan.current_attack !== undefined;
+    const inAutoAttack = scan.phase === 'auto_attack' || scan.progress.phase === 'auto_attack';
+
+    if (hasResults || hasLiveAttack || inAutoAttack) {
       document.getElementById('autoAttackSection').style.display = 'block';
-      const successCount = scan.attack_results.filter(r => r.analysis && r.analysis.success).length;
-      document.getElementById('autoAttackStatus').textContent =
-        `${scan.attack_results.length} executed, ${successCount} successful`;
+      const successCount = (scan.attack_results||[]).filter(r => r.analysis && r.analysis.success).length;
+      const total = scan.progress.auto_attacks_total || 0;
+      const done = scan.progress.auto_attacks_done || 0;
+      const skipped = scan.progress.auto_attacks_skipped || 0;
+
+      let statusText = '';
+      if (scan.phase === 'auto_attack' || scan.progress.phase === 'auto_attack') {
+        statusText = `${done}/${total} executed` + (skipped ? `, ${skipped} skipped` : '') + (successCount ? `, ${successCount} exploited` : '');
+      } else {
+        statusText = `${(scan.attack_results||[]).length} executed` + (skipped ? `, ${skipped} skipped` : '') + `, ${successCount} successful`;
+      }
+      document.getElementById('autoAttackStatus').textContent = statusText;
       document.getElementById('autoAttackStatus').className =
-        successCount > 0 ? 'status-text status-error' : 'status-text status-done';
+        successCount > 0 ? 'status-text status-error' : 'status-text';
 
       let atkHtml = '';
-      scan.attack_results.forEach((r, idx) => {
+
+      // Progress bar during auto-attack
+      if (inAutoAttack && total > 0) {
+        const pctAtk = Math.round((done / total) * 100);
+        atkHtml += `<div class="atk-progress-bar">
+          <div class="atk-progress-fill"><div style="width:${pctAtk}%"></div></div>
+          <span class="atk-progress-text">${done}/${total} attacks</span>
+        </div>`;
+      }
+
+      // Completed attack results
+      (scan.attack_results||[]).forEach((r, idx) => {
         const isSuccess = r.analysis && r.analysis.success;
         const statusClass = isSuccess ? 'exploited' : 'no-exploit';
         const statusLabel = isSuccess ? 'EXPLOITED' : 'NO EXPLOIT';
@@ -571,7 +605,28 @@ async function pollScan(scanId) {
           </div>
         </div>`;
       });
+
+      // Live current attack (streaming output)
+      if (hasLiveAttack) {
+        const ca = scan.current_attack;
+        const liveStatus = ca.status === 'analyzing' ? 'ANALYZING...' : 'RUNNING...';
+        const liveStatusClass = ca.status === 'analyzing' ? 'analyzing' : 'running';
+        atkHtml += `<div class="atk-result running">
+          <div class="atk-result-header">
+            <span class="atk-risk ${ca.risk||'high'}">${esc(ca.risk||'')}</span>
+            <span class="atk-result-name">${esc(ca.name)} (${(ca.index||0)+1}/${ca.total||'?'})</span>
+            <span class="atk-result-status ${liveStatusClass}">${liveStatus}</span>
+          </div>
+          <div style="font-size:.75rem;color:var(--text-dim);margin:.3rem 0">$ ${esc(ca.command||'')}</div>
+          <div class="atk-live-output" id="liveAtkOutput">${esc(ca.output || 'Waiting for output...')}</div>
+        </div>`;
+      }
+
       document.getElementById('autoAttackResults').innerHTML = atkHtml;
+
+      // Auto-scroll live output
+      const liveOut = document.getElementById('liveAtkOutput');
+      if (liveOut) liveOut.scrollTop = liveOut.scrollHeight;
     }
 
     // AI Assessment

