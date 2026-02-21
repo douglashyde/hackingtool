@@ -1,11 +1,25 @@
 version: "3.9"
+
 services:
   hackingtool:
-    image: vgpastor/hackingtool
-    container_name: hackingtool
-    stdin_open: true
-    tty: true
-    volumes:
-      - .:/root/hackingtool
+    build: .
+    container_name: hackingtool-v5
     ports:
-      - 22:22
+      - "5000:5000"
+    environment:
+      - TOOLS_DIR=/opt/hackingtool-arsenal
+      # Optional: set your OpenRouter API key for AI-powered analysis
+      # - OPENROUTER_API_KEY=sk-or-v1-your-key-here
+    volumes:
+      # Persist scan results between restarts
+      - scan-data:/root/hackingtool/scans
+    restart: unless-stopped
+    # Required for some network scanning tools (nmap, masscan)
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    # Optional: use host network for full nmap capability
+    # network_mode: host
+
+volumes:
+  scan-data:

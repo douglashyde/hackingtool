@@ -1,0 +1,12 @@
+.git
+.gitmodules
+metasploit-framework
+__pycache__
+*.pyc
+*.pyo
+.env
+node_modules
+.vscode
+.idea
+*.swp
+*.swo
